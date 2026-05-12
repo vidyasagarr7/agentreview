@@ -4,6 +4,7 @@ import type {
   PRData,
   FindingSeverity,
   FindingStats,
+  ValidationStats,
   ReviewConfidence,
   AgentFinding,
   ParseError,
@@ -84,6 +85,35 @@ function computeStats(
   };
 }
 
+function computeValidationStats(findings: AgentFinding[], visibleFindings: AgentFinding[]): ValidationStats {
+  const stats: ValidationStats = {
+    confirmed: 0,
+    uncertain: 0,
+    disproven: 0,
+    unvalidated: 0,
+    filtered: findings.length - visibleFindings.length,
+  };
+
+  for (const finding of findings) {
+    switch (finding.disposition) {
+      case 'confirmed':
+        stats.confirmed++;
+        break;
+      case 'uncertain':
+        stats.uncertain++;
+        break;
+      case 'disproven':
+        stats.disproven++;
+        break;
+      default:
+        stats.unvalidated++;
+        break;
+    }
+  }
+
+  return stats;
+}
+
 export function consolidate(
   results: AgentResult[],
   pr: PRData,
@@ -97,9 +127,11 @@ export function consolidate(
     : deduplicateFindings(results);
 
   const sortedFindings = sortFindings(dedupedFindings);
+  const visibleFindings = sortedFindings.filter((finding) => finding.disposition !== 'disproven');
   const parseErrors = collectParseErrors(results);
 
-  const stats = computeStats(sortedFindings, parseErrors, results, lensesRun);
+  const stats = computeStats(visibleFindings, parseErrors, results, lensesRun);
+  const validationStats = computeValidationStats(sortedFindings, visibleFindings);
 
   const hasErrors = results.some((r) => !!r.error);
   const hasParseErrors = parseErrors.length > 0;
@@ -118,9 +150,10 @@ export function consolidate(
     },
     reviewedAt: new Date().toISOString(),
     lensesRun,
-    findings: sortedFindings,
+    findings: visibleFindings,
     parseErrors,
     stats,
+    validationStats,
     confidence,
     skippedFiles,
   };

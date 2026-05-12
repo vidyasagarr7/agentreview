@@ -140,4 +140,29 @@ describe('consolidate', () => {
 
     expect(report.lensesRun).toEqual(['security', 'architecture']);
   });
+
+  it('filters disproven findings and reports validation stats', () => {
+    const results: AgentResult[] = [
+      {
+        lensId: 'security',
+        findings: [
+          { ...criticalFinding, confidenceScore: 85, disposition: 'confirmed' },
+          { ...lowFinding, confidenceScore: 52, disposition: 'uncertain' },
+          { ...highFinding, confidenceScore: 20, disposition: 'disproven' },
+        ],
+        durationMs: 100,
+      },
+    ];
+
+    const report = consolidate(results, mockPR);
+
+    expect(report.findings.map((f) => f.id)).toEqual(['sec-001', 'qual-001']);
+    expect(report.validationStats).toEqual({
+      confirmed: 1,
+      uncertain: 1,
+      disproven: 1,
+      unvalidated: 0,
+      filtered: 1,
+    });
+  });
 });

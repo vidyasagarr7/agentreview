@@ -1,4 +1,4 @@
-import type { ConsolidatedReport, AgentFinding, FindingSeverity } from '../../types/index.js';
+import type { ConsolidatedReport, AgentFinding, FindingSeverity, FindingDisposition } from '../../types/index.js';
 
 const SEVERITY_EMOJI: Record<FindingSeverity, string> = {
   CRITICAL: '🔴',
@@ -18,13 +18,17 @@ const SEVERITY_LABEL: Record<FindingSeverity, string> = {
 
 const SEVERITY_ORDER: FindingSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 
-function renderFinding(f: AgentFinding): string {
+function renderFinding(f: AgentFinding, showConfidence = false): string {
   const lensTag = f.lenses.length > 1
     ? `[${f.lenses.join(' + ')}]`
     : `[${f.lenses[0] ?? 'unknown'}]`;
 
+  const confidenceTag = showConfidence && f.confidenceScore !== undefined
+    ? ` _(confidence: ${f.confidenceScore}%)_`
+    : '';
+
   return [
-    `#### ${SEVERITY_EMOJI[f.severity]} ${lensTag} ${f.summary}`,
+    `#### ${SEVERITY_EMOJI[f.severity]} ${lensTag} ${f.summary}${confidenceTag}`,
     ``,
     `**Location:** \`${f.location}\`  `,
     `**Category:** ${f.category}`,
@@ -99,8 +103,59 @@ export function renderMarkdown(report: ConsolidatedReport): string {
     }
   }
 
-  // Findings grouped by severity
-  if (findings.length > 0) {
+  // Validation Summary (only when validation was performed)
+  const vs = report.validationStats;
+  const hasValidation = vs && (vs.confirmed + vs.uncertain + vs.disproven + vs.unvalidated) > 0;
+
+  if (hasValidation && vs) {
+    lines.push(`## Validation Summary`);
+    lines.push(``);
+    lines.push(`| Status | Count |`);
+    lines.push(`|--------|-------|`);
+    if (vs.confirmed > 0) lines.push(`| ✅ Confirmed | ${vs.confirmed} |`);
+    if (vs.uncertain > 0) lines.push(`| ⚠️ Uncertain | ${vs.uncertain} |`);
+    if (vs.disproven > 0) lines.push(`| ❌ Disproven | ${vs.disproven} |`);
+    if (vs.unvalidated > 0) lines.push(`| ❓ Unvalidated | ${vs.unvalidated} |`);
+    if (vs.filtered > 0) lines.push(``);
+    if (vs.filtered > 0) lines.push(`> Filtered from PR comment: ${vs.filtered} low-confidence finding${vs.filtered !== 1 ? 's' : ''} hidden.`);
+    lines.push(``);
+  }
+
+  // Findings grouped by disposition when validated, or by severity when not
+  if (findings.length > 0 && hasValidation) {
+    const confirmed = findings.filter((f) => f.disposition === 'confirmed');
+    const uncertain = findings.filter((f) => f.disposition === 'uncertain');
+    const unvalidated = findings.filter((f) => !f.disposition || f.disposition === 'unvalidated');
+
+    if (confirmed.length > 0) {
+      lines.push(`## ✅ Confirmed Findings`);
+      lines.push(``);
+      for (const f of confirmed) {
+        lines.push(renderFinding(f, true));
+        lines.push(``);
+      }
+    }
+
+    if (uncertain.length > 0) {
+      lines.push(`## ⚠️ Uncertain Findings`);
+      lines.push(``);
+      lines.push(`> These findings scored between 40-59% confidence. Review manually.`);
+      lines.push(``);
+      for (const f of uncertain) {
+        lines.push(renderFinding(f, true));
+        lines.push(``);
+      }
+    }
+
+    if (unvalidated.length > 0) {
+      lines.push(`## Unvalidated Findings`);
+      lines.push(``);
+      for (const f of unvalidated) {
+        lines.push(renderFinding(f));
+        lines.push(``);
+      }
+    }
+  } else if (findings.length > 0) {
     lines.push(`## Findings`);
     lines.push(``);
 

@@ -54,6 +54,7 @@ export interface Lens {
 // ─── Finding Types ────────────────────────────────────────────────────────────
 
 export type FindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+export type FindingDisposition = 'unvalidated' | 'confirmed' | 'uncertain' | 'disproven';
 
 export const SEVERITY_ORDER: FindingSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 
@@ -66,6 +67,8 @@ export interface AgentFinding {
   detail: string;
   suggestion: string;
   lenses: string[];
+  confidenceScore?: number | undefined;
+  disposition?: FindingDisposition;
 }
 
 export interface ParseError {
@@ -98,6 +101,14 @@ export interface FindingStats {
   parseErrorLenses: string[];
 }
 
+export interface ValidationStats {
+  confirmed: number;
+  uncertain: number;
+  disproven: number;
+  unvalidated: number;
+  filtered: number;
+}
+
 export interface ConsolidatedReport {
   pr: {
     title: string;
@@ -114,6 +125,7 @@ export interface ConsolidatedReport {
   findings: AgentFinding[];
   parseErrors: ParseError[];
   stats: FindingStats;
+  validationStats?: ValidationStats;
   confidence: ReviewConfidence;
   /** Files skipped during review (binary or no patch available). */
   skippedFiles: string[];
@@ -138,6 +150,8 @@ export interface CLIOptions {
   timeout: number;
   model?: string;
   noDedup: boolean;
+  validate: boolean;
+  minConfidence: number;
   verbose: boolean;
   yes: boolean;
 }

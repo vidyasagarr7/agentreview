@@ -38,6 +38,8 @@ const criticalFinding = {
   detail: 'Found AKIA... key in source',
   suggestion: 'Use env vars',
   lenses: ['security'],
+  confidenceScore: 85,
+  disposition: 'confirmed' as const,
 };
 
 describe('renderMarkdown', () => {
@@ -110,5 +112,58 @@ describe('renderMarkdown', () => {
     const output = renderMarkdown(baseReport);
     expect(output).toContain('Lens Notes');
     expect(output).toContain('✅ No issues found.');
+  });
+
+  it('shows validation summary and confidence on findings', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [criticalFinding],
+      validationStats: {
+        confirmed: 1,
+        uncertain: 0,
+        disproven: 2,
+        unvalidated: 0,
+        filtered: 2,
+      },
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1 },
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Validation Summary');
+    expect(output).toContain('confidence: 85%');
+    expect(output).toContain('Filtered from PR comment: 2');
+    expect(output).toContain('Confirmed Findings');
+  });
+
+  it('groups uncertain findings separately with a caveat', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [{ ...criticalFinding, disposition: 'uncertain' as const, confidenceScore: 45 }],
+      validationStats: {
+        confirmed: 0,
+        uncertain: 1,
+        disproven: 0,
+        unvalidated: 0,
+        filtered: 0,
+      },
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1 },
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Uncertain Findings');
+    expect(output).toContain('⚠️');
+    expect(output).toContain('confidence: 45%');
   });
 });

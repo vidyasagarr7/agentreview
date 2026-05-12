@@ -10,6 +10,7 @@ import { LensRegistry } from '../lenses/registry.js';
 import { LLMClient } from '../llm/client.js';
 import { dispatchAgents } from '../agents/dispatcher.js';
 import { consolidate } from '../report/consolidator.js';
+import { validateAgentResults } from '../validation/validator.js';
 import { render } from '../report/renderer.js';
 import { ConfigManager, ConfigError } from './config.js';
 import { checkDataDisclosure } from './disclosure.js';
@@ -28,6 +29,8 @@ async function reviewPR(prUrl: string, opts: {
   post: boolean;
   verbose: boolean;
   noDedup: boolean;
+  validate: boolean;
+  minConfidence: number;
   yes: boolean;
   output?: string;
 }): Promise<void> {
@@ -155,8 +158,24 @@ async function reviewPR(prUrl: string, opts: {
     },
   });
 
+  // ── Validate findings ─────────────────────────────────────────────────────
+  let validatedResults = agentResults;
+  if (opts.validate) {
+    const validateSpinner = ora('Validating findings…').start();
+    try {
+      validatedResults = await validateAgentResults(agentResults, context, llm, {
+        minConfidence: opts.minConfidence,
+      });
+      const totalFindings = validatedResults.flatMap((r) => (Array.isArray(r.findings) ? r.findings : [])).length;
+      const disproven = validatedResults.flatMap((r) => (Array.isArray(r.findings) ? r.findings : [])).filter((f) => f.disposition === 'disproven').length;
+      validateSpinner.succeed(`Validation complete (${disproven} of ${totalFindings + disproven} findings filtered)`);
+    } catch (err) {
+      validateSpinner.warn(`Validation failed: ${(err as Error).message} — proceeding without validation`);
+    }
+  }
+
   // ── Consolidate & render ──────────────────────────────────────────────────
-  const report = consolidate(agentResults, pr, opts.noDedup, context.skippedFiles ?? []);
+  const report = consolidate(validatedResults, pr, opts.noDedup, context.skippedFiles ?? []);
   const rendered = render(report, opts.format);
 
   // ── Output ────────────────────────────────────────────────────────────────
@@ -265,6 +284,20 @@ program
     'Disable cross-lens deduplication of findings'
   )
   .option(
+    '--validate',
+    'Enable confidence scoring and validation gate (default: true)',
+    true
+  )
+  .option(
+    '--no-validate',
+    'Disable confidence scoring and validation gate'
+  )
+  .option(
+    '--min-confidence <score>',
+    'Minimum confidence score (0-100) to keep a finding (default: 40)',
+    (v: string) => parseInt(v, 10)
+  )
+  .option(
     '-v, --verbose',
     'Enable verbose progress output',
     false
@@ -292,6 +325,8 @@ program
         post: opts.post,
         verbose: opts.verbose,
         noDedup: !opts.dedup, // commander inverts --no-dedup → opts.dedup
+        validate: opts.validate,
+        minConfidence: opts.minConfidence ?? 40,
         yes: opts.yes,
         output: opts.output,
       });
