@@ -83,6 +83,11 @@ export class ConfigManager {
     return process.env.AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY === '1';
   }
 
+  getTimeout(): number {
+    const val = process.env.AGENTREVIEW_TIMEOUT;
+    return val ? parseInt(val, 10) : 60;
+  }
+
   getDefaultLenses(): string {
     return process.env.AGENTREVIEW_LENSES ?? 'all';
   }

@@ -219,10 +219,11 @@ INFO      → ⚪ FYI / informational
 
 Renders `ConsolidatedReport` to output format.
 
-**Formats:**
+**Formats (v1):**
 - `markdown` (default): Full markdown with headers, tables, code refs
 - `json`: Raw structured data for tooling integration
-- `terminal`: Color-coded, human-readable, compact (no markdown syntax)
+
+> **Note:** `terminal` format was considered but deferred from v1. Markdown and JSON cover all current use cases.
 
 **Markdown report structure:**
 ```markdown
@@ -341,7 +342,7 @@ agentreview lenses add ./my-lens.json
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--lens` | `string` | `all` | Comma-separated lens IDs to run |
-| `--format` | `string` | `markdown` | Output format: `markdown`, `json`, `terminal` |
+| `--format` | `string` | `markdown` | Output format: `markdown`, `json` |
 | `--output` | `string` | stdout | Output file path |
 | `--post` | `bool` | false | Post report as PR comment |
 | `--fail-on` | `string` | none | Exit code 2 if findings at this severity+ |

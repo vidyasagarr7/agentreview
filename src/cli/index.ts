@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { Command, Option } from 'commander';
 import ora from 'ora';
 import { writeFile, mkdir } from 'fs/promises';
@@ -247,8 +245,7 @@ program
   .option(
     '--timeout <seconds>',
     'Per-agent timeout in seconds',
-    (v) => parseInt(v, 10),
-    60
+    (v) => parseInt(v, 10)
   )
   .option(
     '--model <model>',
@@ -284,11 +281,13 @@ program
       const lensesValue: string = opts.lens ?? opts.lenses ?? config.getDefaultLenses();
       // Resolve --fail-on: CLI flag overrides env var
       const failOnValue: string | undefined = opts.failOn ?? config.getFailOnSeverity();
+      // Resolve timeout: CLI flag > env var (via ConfigManager) > hardcoded default
+      const timeoutValue: number = opts.timeout ?? config.getTimeout();
       await reviewPR(prUrl, {
         format: opts.format as ReportFormat,
         lenses: lensesValue,
         failOn: failOnValue,
-        timeout: opts.timeout,
+        timeout: timeoutValue,
         model: opts.model,
         post: opts.post,
         verbose: opts.verbose,

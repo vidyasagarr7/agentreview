@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: ['src/cli/index.ts'],
-  format: ['cjs'],
+  format: ['esm'],
   target: 'node20',
   outDir: 'dist/cli',
   clean: true,
