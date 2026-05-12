@@ -131,6 +131,40 @@ export interface ConsolidatedReport {
   skippedFiles: string[];
 }
 
+// ─── Fix Types ────────────────────────────────────────────────────────────────
+
+export type FixStatus = 'pending' | 'applied' | 'verified' | 'reverted' | 'failed';
+
+export interface FixAttempt {
+  findingId: string;
+  finding: AgentFinding;
+  patch: string;
+  explanation: string;
+  status: FixStatus;
+  verificationResult?: string;
+}
+
+export interface VerificationResult {
+  findingId: string;
+  passed: boolean;
+  issues: string[];
+}
+
+export interface FixReport {
+  pr: {
+    title: string;
+    number: number;
+    repoOwner: string;
+    repoName: string;
+  };
+  eligible: number;
+  generated: number;
+  verified: number;
+  reverted: number;
+  failed: number;
+  fixes: FixAttempt[];
+}
+
 // ─── Config Types ─────────────────────────────────────────────────────────────
 
 export interface LLMConfig {

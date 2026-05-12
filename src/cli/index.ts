@@ -15,6 +15,7 @@ import { render } from '../report/renderer.js';
 import { ConfigManager, ConfigError } from './config.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
+import { createFixCommand } from './commands/fix.js';
 import type { FindingSeverity, ReportFormat } from '../types/index.js';
 import { SEVERITY_ORDER } from '../types/index.js';
 
@@ -341,5 +342,6 @@ program
 
 // Sub-commands
 program.addCommand(createLensesCommand());
+program.addCommand(createFixCommand());
 
 program.parseAsync(process.argv);
