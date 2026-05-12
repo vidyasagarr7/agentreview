@@ -16,6 +16,8 @@ import { ConfigManager, ConfigError } from './config.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
+import { runEnsemble } from '../ensemble/index.js';
+import { renderEnsembleReport } from '../ensemble/renderer.js';
 import type { FindingSeverity, ReportFormat } from '../types/index.js';
 import { SEVERITY_ORDER } from '../types/index.js';
 
@@ -32,6 +34,7 @@ async function reviewPR(prUrl: string, opts: {
   noDedup: boolean;
   validate: boolean;
   minConfidence: number;
+  ensemble?: string;
   yes: boolean;
   output?: string;
 }): Promise<void> {
@@ -138,7 +141,61 @@ async function reviewPR(prUrl: string, opts: {
     }
   }
 
-  // ── Dispatch agents ───────────────────────────────────────────────────────
+  // ── Ensemble mode ─────────────────────────────────────────────────────────
+  if (opts.ensemble) {
+    const ensembleModels = config.parseEnsembleModels(opts.ensemble);
+    if (ensembleModels.length < 2) {
+      console.error('❌ --ensemble requires at least 2 models (comma-separated).');
+      console.error('   Example: --ensemble claude-sonnet-4-20250514,gpt-4o');
+      process.exit(1);
+    }
+
+    const ensembleSpinner = ora(`Running ensemble review with ${ensembleModels.length} models: ${ensembleModels.map((m) => m.label).join(', ')}…`).start();
+
+    const ensembleResult = await runEnsemble(
+      {
+        models: ensembleModels,
+        strategy: 'majority',
+        timeout: llmConfig.timeout,
+        contextTokens: llmConfig.contextTokens,
+      },
+      lenses,
+      context,
+      { verbose: opts.verbose },
+    );
+
+    ensembleSpinner.succeed(
+      `Ensemble complete: ${ensembleResult.stats.modelsSucceeded}/${ensembleResult.stats.modelsRun} models, ` +
+      `${ensembleResult.stats.totalRawFindings} raw → ${ensembleResult.stats.mergedFindings} merged findings`
+    );
+
+    const rendered = renderEnsembleReport(ensembleResult, pr.title, pr.number);
+
+    if (opts.output) {
+      await mkdir(dirname(opts.output), { recursive: true });
+      await writeFile(opts.output, rendered, 'utf-8');
+      console.error(`✅ Report written to: ${opts.output}`);
+    } else {
+      process.stdout.write(rendered + '\n');
+    }
+
+    if (opts.post) {
+      const postSpinner = ora('Posting ensemble review to GitHub…').start();
+      try {
+        await githubClient.postOrUpdateComment(owner, repo, number, rendered);
+        postSpinner.succeed('Ensemble review posted to GitHub');
+      } catch (err) {
+        postSpinner.fail('Failed to post comment');
+        console.error(`⚠️  Could not post to GitHub: ${(err as Error).message}`);
+      }
+    }
+
+    const { stats } = ensembleResult;
+    console.error(`\n📋 Ensemble: ${stats.unanimousFindings} unanimous, ${stats.majorityFindings} majority, ${stats.singleSourceFindings} single-source`);
+    return;
+  }
+
+  // ── Dispatch agents (single-model mode) ────────────────────────────────────
   const llm = new LLMClient(llmConfig);
   const agentSpinners = new Map<string, ReturnType<typeof ora>>();
 
@@ -299,6 +356,10 @@ program
     (v: string) => parseInt(v, 10)
   )
   .option(
+    '--ensemble <models>',
+    'Run multi-model ensemble review (comma-separated: claude-sonnet-4-20250514,gpt-4o)'
+  )
+  .option(
     '-v, --verbose',
     'Enable verbose progress output',
     false
@@ -328,6 +389,7 @@ program
         noDedup: !opts.dedup, // commander inverts --no-dedup → opts.dedup
         validate: opts.validate,
         minConfidence: opts.minConfidence ?? 40,
+        ensemble: opts.ensemble,
         yes: opts.yes,
         output: opts.output,
       });

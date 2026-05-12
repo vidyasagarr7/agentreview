@@ -131,6 +131,48 @@ export interface ConsolidatedReport {
   skippedFiles: string[];
 }
 
+// ─── Ensemble Types ─────────────────────────────────────────────────────────────
+
+export interface ModelConfig {
+  provider: 'openai' | 'anthropic';
+  model: string;
+  apiKey: string;
+  label: string;  // e.g. 'claude-sonnet', 'gpt-4o' — used in source tracking
+}
+
+export interface EnsembleConfig {
+  models: ModelConfig[];
+  strategy: 'unanimous' | 'majority' | 'any';  // agreement strategy
+  timeout: number;
+  contextTokens: number;
+}
+
+export interface ModelFinding extends AgentFinding {
+  modelSource: string;   // label of the model that found it
+  modelSources: string[];  // all models that found this (after merge)
+  agreementCount: number;  // how many models found similar issue
+}
+
+export interface EnsembleResult {
+  modelResults: Array<{
+    label: string;
+    model: string;
+    findings: AgentFinding[];
+    error?: string;
+    durationMs: number;
+  }>;
+  mergedFindings: ModelFinding[];
+  stats: {
+    modelsRun: number;
+    modelsSucceeded: number;
+    totalRawFindings: number;
+    mergedFindings: number;
+    unanimousFindings: number;   // found by all models
+    majorityFindings: number;    // found by >50% of models
+    singleSourceFindings: number; // found by only one model
+  };
+}
+
 // ─── Fix Types ────────────────────────────────────────────────────────────────
 
 export type FixStatus = 'pending' | 'applied' | 'verified' | 'reverted' | 'failed';

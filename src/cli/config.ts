@@ -1,6 +1,6 @@
 import { config as loadDotenv } from 'dotenv';
 import { resolve } from 'path';
-import type { LLMConfig, FindingSeverity } from '../types/index.js';
+import type { LLMConfig, ModelConfig, FindingSeverity } from '../types/index.js';
 
 // Load .env from current working directory
 loadDotenv({ path: resolve(process.cwd(), '.env') });
@@ -109,6 +109,38 @@ export class ConfigManager {
 
   getDefaultFormat(): string {
     return process.env.AGENTREVIEW_FORMAT ?? 'markdown';
+  }
+
+  /**
+   * Parse ensemble model specs from a comma-separated string.
+   * Format: "claude-sonnet-4-20250514,gpt-4o" or "anthropic:claude-sonnet-4-20250514,openai:gpt-4o"
+   * Auto-detects provider from model name if not specified.
+   */
+  parseEnsembleModels(spec: string): ModelConfig[] {
+    return spec.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+      let provider: 'openai' | 'anthropic';
+      let model: string;
+
+      if (entry.includes(':')) {
+        const [p, m] = entry.split(':', 2);
+        provider = p as 'openai' | 'anthropic';
+        model = m;
+      } else {
+        model = entry;
+        provider = detectProvider(model);
+      }
+
+      const apiKey = provider === 'anthropic'
+        ? process.env.ANTHROPIC_API_KEY
+        : process.env.OPENAI_API_KEY;
+
+      if (!apiKey) {
+        const envVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+        throw new ConfigError(`${envVar} required for ensemble model "${model}"`);
+      }
+
+      return { provider, model, apiKey, label: model };
+    });
   }
 
   getFailOnSeverity(): FindingSeverity | undefined {
