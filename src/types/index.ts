@@ -36,6 +36,7 @@ export interface ReviewContext {
   estimatedTokens: number;
   /** Files skipped because they are binary or have no patch (e.g. binary blobs). */
   skippedFiles?: string[];
+  codebase?: CodebaseContext;
 }
 
 // ─── Lens Types ───────────────────────────────────────────────────────────────
@@ -129,6 +130,46 @@ export interface ConsolidatedReport {
   confidence: ReviewConfidence;
   /** Files skipped during review (binary or no patch available). */
   skippedFiles: string[];
+}
+
+// ─── Codebase Context Types ─────────────────────────────────────────────────
+
+export interface RepoFileEntry {
+  path: string;
+  type: 'blob' | 'tree';
+  size?: number;
+}
+
+export interface RepoTree {
+  sha: string;
+  entries: RepoFileEntry[];
+  truncated: boolean;
+}
+
+export interface ImportEdge {
+  from: string;
+  to: string;
+  symbols?: string[];
+  external: boolean;
+}
+
+export interface CodebaseContextDiagnostic {
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
+
+export interface CodebaseContext {
+  baseSha: string;
+  tree?: RepoTree;
+  importsOut: ImportEdge[];
+  rendered: string;
+  estimatedTokens: number;
+  truncated: boolean;
+  diagnostics: CodebaseContextDiagnostic[];
+  parserUsed: 'regex';
+  languagesCovered: string[];
+  filesAnalyzed: number;
+  filesFailed: number;
 }
 
 // ─── Ensemble Types ─────────────────────────────────────────────────────────────

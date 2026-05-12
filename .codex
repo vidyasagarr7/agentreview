@@ -1,0 +1,2 @@
+# Disable auto-loading skills for one-shot exec tasks
+# Skills are great for interactive sessions but kill one-shot automation
