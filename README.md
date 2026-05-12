@@ -1,5 +1,9 @@
 # AgentReview
 
+[![npm version](https://img.shields.io/npm/v/agentreview.svg)](https://www.npmjs.com/package/agentreview)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
+
 Multi-perspective automated PR review using parallel AI agents — security, architecture, and code quality lenses running in parallel against any GitHub PR.
 
 ## Features
@@ -24,7 +28,7 @@ npm install -g agentreview
 ### From source
 
 ```bash
-git clone https://github.com/your-org/agentreview
+git clone https://github.com/vidyasagarr7/agentreview
 cd agentreview
 npm install
 npm run build
@@ -259,6 +263,10 @@ npm test
 npm run dev
 ```
 
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+[MIT](LICENSE) © [Vidya](https://github.com/vidyasagarr7)
