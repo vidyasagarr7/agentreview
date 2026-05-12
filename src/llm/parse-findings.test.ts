@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFindings } from './parse-findings.js';
-import type { ParseError } from '../types/index.js';
+import type { AgentFinding, ParseError } from '../types/index.js';
 
 const validFinding = {
   id: 'sec-001',
@@ -17,7 +17,7 @@ describe('parseFindings', () => {
     const raw = JSON.stringify([validFinding]);
     const result = parseFindings(raw, 'security');
     expect(Array.isArray(result)).toBe(true);
-    expect((result as ReturnType<typeof parseFindings>).length).toBe(1);
+    expect((result as AgentFinding[]).length).toBe(1);
   });
 
   it('parses JSON inside a markdown code fence', () => {
@@ -42,7 +42,7 @@ describe('parseFindings', () => {
     const raw = JSON.stringify({ findings: [validFinding] });
     const result = parseFindings(raw, 'security');
     expect(Array.isArray(result)).toBe(true);
-    expect((result as ReturnType<typeof parseFindings>).length).toBe(1);
+    expect((result as AgentFinding[]).length).toBe(1);
   });
 
   it('handles trailing commas (common LLM error)', () => {
@@ -84,11 +84,13 @@ describe('parseFindings', () => {
     expect((result as unknown[]).length).toBe(1); // only the valid one
   });
 
-  it('rejects invalid severity values', () => {
+  it('rejects invalid severity values — all malformed returns ParseError', () => {
     const badSeverity = { ...validFinding, severity: 'BLOCKER' };
     const raw = JSON.stringify([badSeverity]);
     const result = parseFindings(raw, 'quality');
-    expect(Array.isArray(result)).toBe(true);
-    expect((result as unknown[]).length).toBe(0); // filtered out
+    // All findings are malformed (invalid severity) → ParseError, not empty array
+    expect(Array.isArray(result)).toBe(false);
+    expect((result as ParseError).type).toBe('ParseError');
+    expect((result as ParseError).message).toContain('[PARSE ERROR]');
   });
 });

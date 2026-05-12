@@ -58,8 +58,7 @@ export function renderMarkdown(report: ConsolidatedReport): string {
 
   const lines: string[] = [];
 
-  // Header
-  lines.push(`<!-- agentreview -->`);
+  // Header (the <!-- agentreview --> marker is added by the GitHub posting layer only)
   lines.push(`# AgentReview: PR #${pr.number} — ${pr.title}`);
   lines.push(``);
   lines.push(`> **Reviewed by:** ${lensesRun.join(' · ')}  `);
@@ -144,6 +143,18 @@ export function renderMarkdown(report: ConsolidatedReport): string {
       lines.push(`✅ No issues found.`);
     } else {
       lines.push(`Found ${count} issue${count !== 1 ? 's' : ''}.`);
+    }
+    lines.push(``);
+  }
+
+  // Skipped files (binary or no patch available)
+  if (report.skippedFiles && report.skippedFiles.length > 0) {
+    lines.push(`## ⚠️ Skipped Files`);
+    lines.push(``);
+    lines.push(`The following files were not reviewed because they are binary or have no diff patch:`);
+    lines.push(``);
+    for (const f of report.skippedFiles) {
+      lines.push(`- \`${f}\` _(binary or no patch)_`);
     }
     lines.push(``);
   }

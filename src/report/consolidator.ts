@@ -87,7 +87,8 @@ function computeStats(
 export function consolidate(
   results: AgentResult[],
   pr: PRData,
-  noDedup = false
+  noDedup = false,
+  skippedFiles: string[] = []
 ): ConsolidatedReport {
   const lensesRun = results.map((r) => r.lensId);
 
@@ -121,5 +122,6 @@ export function consolidate(
     parseErrors,
     stats,
     confidence,
+    skippedFiles,
   };
 }

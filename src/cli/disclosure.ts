@@ -23,14 +23,21 @@ export async function checkDataDisclosure(
   process.stderr.write(DISCLOSURE_MESSAGE);
 
   if (nonInteractive) {
-    process.stderr.write('⚠️  Running in non-interactive mode. Proceeding automatically.\n\n');
+    // --yes was explicitly passed: user has acknowledged the data policy
+    process.stderr.write('⚠️  Data disclosure acknowledged via --yes flag.\n\n');
     return;
   }
 
   // Check if stdin is a TTY (interactive terminal)
   if (!process.stdin.isTTY) {
-    process.stderr.write('⚠️  Non-interactive environment detected. Proceeding automatically.\n\n');
-    return;
+    process.stderr.write(
+      '❌  Non-interactive environment detected and --yes flag was not passed.\n' +
+      '   AgentReview cannot proceed without explicit consent to send PR diffs to an LLM provider.\n' +
+      '   In CI or piped usage, pass --yes (or -y) to acknowledge the data policy:\n' +
+      '     agentreview <pr-url> --yes\n' +
+      '   Or set AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1 to skip the prompt entirely.\n\n'
+    );
+    process.exit(1);
   }
 
   return new Promise((resolve, reject) => {

@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "test": "vitest run",
+    "test": "tsc --noEmit && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
@@ -40,5 +40,6 @@
     "github",
     "cli"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "type": "module"
 }

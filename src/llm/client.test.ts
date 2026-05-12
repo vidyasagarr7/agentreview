@@ -29,9 +29,10 @@ describe('LLMClient', () => {
     const mockCreate = vi.fn().mockResolvedValueOnce({
       choices: [{ message: { content: '["finding1"]' } }],
     });
-    vi.mocked(OpenAI).mockImplementation(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
       chat: { completions: { create: mockCreate } },
-    }) as ReturnType<typeof OpenAI>);
+    }));
 
     const client = new LLMClient(testConfig);
     const result = await client.complete('system', 'user');
@@ -41,9 +42,10 @@ describe('LLMClient', () => {
   it('throws LLMError on 401 without retry', async () => {
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 401, message: 'Unauthorized' });
-    vi.mocked(OpenAI).mockImplementation(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
       chat: { completions: { create: mockCreate } },
-    }) as ReturnType<typeof OpenAI>);
+    }));
 
     const client = new LLMClient(testConfig);
     await expect(client.complete('system', 'user')).rejects.toThrow(LLMError);
@@ -53,9 +55,10 @@ describe('LLMClient', () => {
   it('throws LLMError on 404 model not found', async () => {
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 404, message: 'Model not found' });
-    vi.mocked(OpenAI).mockImplementation(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
       chat: { completions: { create: mockCreate } },
-    }) as ReturnType<typeof OpenAI>);
+    }));
 
     const client = new LLMClient(testConfig);
     await expect(client.complete('system', 'user')).rejects.toThrow(/model not found/i);
@@ -65,9 +68,10 @@ describe('LLMClient', () => {
     vi.useFakeTimers();
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 429, message: 'Rate limit' });
-    vi.mocked(OpenAI).mockImplementation(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
       chat: { completions: { create: mockCreate } },
-    }) as ReturnType<typeof OpenAI>);
+    }));
 
     const client = new LLMClient(testConfig);
 

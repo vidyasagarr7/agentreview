@@ -2,14 +2,27 @@ import { Octokit } from '@octokit/rest';
 import type { PRData, ChangedFile } from '../types/index.js';
 
 export class GitHubAuthError extends Error {
-  constructor() {
+  constructor(statusCode = 401) {
     super(
-      'GitHub token missing or invalid.\n' +
+      `GitHub token ${statusCode === 403 ? 'lacks required permissions' : 'is missing or invalid'}.\n` +
       'Set GITHUB_TOKEN environment variable:\n' +
       '  export GITHUB_TOKEN=ghp_...\n' +
-      'Or create a .env file with GITHUB_TOKEN=ghp_...'
+      'Or create a .env file with GITHUB_TOKEN=ghp_...\n' +
+      'Required scopes: repo (for private repos) or public_repo (for public repos)'
     );
     this.name = 'GitHubAuthError';
+  }
+}
+
+export class GitHubRateLimitError extends Error {
+  constructor(resetAt: string) {
+    super(
+      `GitHub API rate limit exceeded.\n` +
+      `Rate limit resets at: ${resetAt}\n` +
+      'Consider using a GitHub token with higher rate limits:\n' +
+      '  export GITHUB_TOKEN=ghp_...'
+    );
+    this.name = 'GitHubRateLimitError';
   }
 }
 
@@ -21,6 +34,37 @@ export class GitHubNotFoundError extends Error {
 }
 
 const FILE_WARNING_THRESHOLD = 300;
+
+/** Parses a GitHub API error and throws a typed error. */
+function throwGitHubError(err: unknown, owner: string, repo: string, number: number): never {
+  const error = err as {
+    status?: number;
+    response?: { headers?: Record<string, string> };
+  };
+
+  if (error.status === 401) {
+    throw new GitHubAuthError(401);
+  }
+
+  if (error.status === 403) {
+    // Distinguish rate limit (x-ratelimit-remaining: 0) from permission errors
+    const remaining = error.response?.headers?.['x-ratelimit-remaining'];
+    const resetEpoch = error.response?.headers?.['x-ratelimit-reset'];
+    if (remaining === '0') {
+      const resetAt = resetEpoch
+        ? new Date(parseInt(resetEpoch, 10) * 1000).toISOString()
+        : 'unknown time';
+      throw new GitHubRateLimitError(resetAt);
+    }
+    throw new GitHubAuthError(403);
+  }
+
+  if (error.status === 404) {
+    throw new GitHubNotFoundError(owner, repo, number);
+  }
+
+  throw err;
+}
 
 export class GitHubClient {
   private octokit: Octokit;
@@ -53,10 +97,7 @@ export class GitHubClient {
         state: pr.merged_at ? 'merged' : (pr.state as 'open' | 'closed'),
       };
     } catch (err: unknown) {
-      const error = err as { status?: number };
-      if (error.status === 401 || error.status === 403) throw new GitHubAuthError();
-      if (error.status === 404) throw new GitHubNotFoundError(owner, repo, number);
-      throw err;
+      throwGitHubError(err, owner, repo, number);
     }
   }
 
@@ -132,6 +173,7 @@ export class GitHubClient {
   }
 
   async postOrUpdateComment(owner: string, repo: string, number: number, body: string): Promise<void> {
+    // Only the GitHub posting layer owns the hidden update marker — do not add it in the renderer.
     const markedBody = `<!-- agentreview -->\n${body}`;
     const existingId = await this.findAgentReviewComment(owner, repo, number);
 

@@ -34,6 +34,8 @@ export interface ReviewContext {
   truncated: boolean;
   truncationNote?: string;
   estimatedTokens: number;
+  /** Files skipped because they are binary or have no patch (e.g. binary blobs). */
+  skippedFiles?: string[];
 }
 
 // ─── Lens Types ───────────────────────────────────────────────────────────────
@@ -113,6 +115,8 @@ export interface ConsolidatedReport {
   parseErrors: ParseError[];
   stats: FindingStats;
   confidence: ReviewConfidence;
+  /** Files skipped during review (binary or no patch available). */
+  skippedFiles: string[];
 }
 
 // ─── Config Types ─────────────────────────────────────────────────────────────

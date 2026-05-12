@@ -2,10 +2,11 @@
 
 import { Command, Option } from 'commander';
 import ora from 'ora';
-import { writeFile } from 'fs/promises';
-import { join, homedir } from 'path';
+import { writeFile, mkdir } from 'fs/promises';
+import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { parsePRUrl, InvalidPRUrlError } from '../github/parse-url.js';
-import { GitHubClient, GitHubAuthError, GitHubNotFoundError } from '../github/client.js';
+import { GitHubClient, GitHubAuthError, GitHubNotFoundError, GitHubRateLimitError } from '../github/client.js';
 import { buildReviewContext } from '../github/context-builder.js';
 import { LensRegistry } from '../lenses/registry.js';
 import { LLMClient } from '../llm/client.js';
@@ -117,7 +118,7 @@ async function reviewPR(prUrl: string, opts: {
     fetchSpinner.succeed(`Fetched PR #${number}: ${pr.title}`);
   } catch (err) {
     fetchSpinner.fail('Failed to fetch PR');
-    if (err instanceof GitHubAuthError || err instanceof GitHubNotFoundError) {
+    if (err instanceof GitHubAuthError || err instanceof GitHubNotFoundError || err instanceof GitHubRateLimitError) {
       console.error(`❌ ${err.message}`);
     } else {
       console.error(`❌ GitHub error: ${(err as Error).message}`);
@@ -157,11 +158,12 @@ async function reviewPR(prUrl: string, opts: {
   });
 
   // ── Consolidate & render ──────────────────────────────────────────────────
-  const report = consolidate(agentResults, pr, opts.noDedup);
+  const report = consolidate(agentResults, pr, opts.noDedup, context.skippedFiles ?? []);
   const rendered = render(report, opts.format);
 
   // ── Output ────────────────────────────────────────────────────────────────
   if (opts.output) {
+    await mkdir(dirname(opts.output), { recursive: true });
     await writeFile(opts.output, rendered, 'utf-8');
     console.error(`✅ Report written to: ${opts.output}`);
   } else {
@@ -228,12 +230,15 @@ program
   .addOption(
     new Option('--format <format>', 'Output format')
       .choices(['markdown', 'json'])
-      .default('markdown')
+      .default(new ConfigManager().getDefaultFormat())
   )
   .option(
     '--lenses <lenses>',
-    'Comma-separated lens IDs to run, or "all"',
-    'all'
+    'Comma-separated lens IDs to run, or "all"'
+  )
+  .option(
+    '--lens <lenses>',
+    'Alias for --lenses (comma-separated lens IDs, or "all")'
   )
   .option(
     '--fail-on <severity>',
@@ -269,15 +274,20 @@ program
   )
   .option(
     '-y, --yes',
-    'Skip the data disclosure prompt (non-interactive mode)',
+    'I acknowledge that PR diffs will be sent to an external LLM provider (required for non-interactive/CI use)',
     false
   )
   .action(async (prUrl: string, opts) => {
     try {
+      const config = new ConfigManager();
+      // Resolve --lens / --lenses (--lens is alias for --lenses)
+      const lensesValue: string = opts.lens ?? opts.lenses ?? config.getDefaultLenses();
+      // Resolve --fail-on: CLI flag overrides env var
+      const failOnValue: string | undefined = opts.failOn ?? config.getFailOnSeverity();
       await reviewPR(prUrl, {
         format: opts.format as ReportFormat,
-        lenses: opts.lenses,
-        failOn: opts.failOn,
+        lenses: lensesValue,
+        failOn: failOnValue,
         timeout: opts.timeout,
         model: opts.model,
         post: opts.post,

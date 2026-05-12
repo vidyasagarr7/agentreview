@@ -43,41 +43,31 @@ export class ConfigManager {
   }
 
   getLLMConfig(modelOverride?: string): LLMConfig {
-    const provider = (process.env.LLM_PROVIDER ?? 'openai') as 'openai' | 'anthropic';
+    const rawProvider = process.env.LLM_PROVIDER ?? 'openai';
     const model = modelOverride ?? process.env.AGENTREVIEW_MODEL ?? 'gpt-4o';
     const timeout = parseInt(process.env.AGENTREVIEW_TIMEOUT ?? '60', 10);
 
-    if (provider === 'openai') {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        throw new ConfigError(
-          'OpenAI API key not found.\n\n' +
-          'Set the OPENAI_API_KEY environment variable:\n' +
-          '  export OPENAI_API_KEY=sk-...\n\n' +
-          'Or add OPENAI_API_KEY=sk-... to a .env file in your current directory.'
-        );
-      }
-      return {
-        provider: 'openai',
-        model,
-        apiKey,
-        timeout,
-        contextTokens: this.getModelContextTokens(model),
-      };
+    // Only OpenAI is supported in v1.
+    if (rawProvider !== 'openai') {
+      throw new ConfigError(
+        `LLM provider "${rawProvider}" is not supported in v1. ` +
+        `Only "openai" is available. Anthropic support is planned for v2.\n` +
+        `Set LLM_PROVIDER=openai (or leave unset).`
+      );
     }
 
-    // Anthropic (future provider)
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new ConfigError(
-        'Anthropic API key not found.\n\n' +
-        'Set the ANTHROPIC_API_KEY environment variable:\n' +
-        '  export ANTHROPIC_API_KEY=sk-ant-...'
+        'OpenAI API key not found.\n\n' +
+        'Set the OPENAI_API_KEY environment variable:\n' +
+        '  export OPENAI_API_KEY=sk-...\n\n' +
+        'Or add OPENAI_API_KEY=sk-... to a .env file in your current directory.'
       );
     }
 
     return {
-      provider: 'anthropic',
+      provider: 'openai',
       model,
       apiKey,
       timeout,

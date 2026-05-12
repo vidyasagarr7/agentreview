@@ -9,11 +9,36 @@ export interface DispatchOptions {
   onProgress?: (lensId: string, status: 'started' | 'completed' | 'failed', durationMs?: number) => void;
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`[${label}] Agent timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-  );
-  return Promise.race([promise, timeoutPromise]);
+/**
+ * Runs a factory function with a timeout, using AbortController to cancel
+ * the underlying operation when the timeout fires.
+ * Clears the timer on success to avoid leaks.
+ */
+async function withTimeout<T>(
+  factory: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`[${label}] Agent timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([factory(controller.signal), timeoutPromise]);
+    // Clear timer on success to avoid leaking live timers
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    // Ensure timer is cleared even on error
+    clearTimeout(timer);
+    throw err;
+  }
 }
 
 async function dispatchSingleAgent(
@@ -31,7 +56,7 @@ async function dispatchSingleAgent(
     const timeoutMs = options.timeoutMs ?? 60000;
 
     const raw = await withTimeout(
-      llm.complete(system, user),
+      (signal) => llm.complete(system, user, signal),
       timeoutMs,
       lens.id
     );

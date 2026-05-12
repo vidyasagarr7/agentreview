@@ -168,5 +168,16 @@ export function parseFindings(raw: string, lensId: string): AgentFinding[] | Par
     console.warn(`⚠️  [${lensId}] Filtered ${filteredCount} malformed finding(s) from response.`);
   }
 
+  // If items were present but ALL were malformed, this is a parse/validation failure.
+  // Returning an empty array here would create a false "clean" report.
+  if (items.length > 0 && valid.length === 0) {
+    return {
+      type: 'ParseError',
+      lensId,
+      raw: trimmed.slice(0, 300),
+      message: `[PARSE ERROR] ${lensId} lens returned ${items.length} finding(s) but none passed validation — results may be incomplete`,
+    };
+  }
+
   return valid;
 }

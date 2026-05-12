@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { mkdir, copyFile, access } from 'fs/promises';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import { LensRegistry } from '../../lenses/registry.js';
+import { LensRegistry, validateLens } from '../../lenses/registry.js';
 
 const CUSTOM_LENS_DIR = join(homedir(), '.agentreview', 'lenses');
 
@@ -55,19 +55,8 @@ export function createLensesCommand(): Command {
         const raw = await readFile(lensPath, 'utf-8');
         const data = JSON.parse(raw);
 
-        // Basic validation
-        const required = ['id', 'name', 'description', 'systemPrompt', 'focusAreas'];
-        for (const field of required) {
-          if (!data[field]) {
-            console.error(`❌ Lens file is missing required field: "${field}"`);
-            process.exit(1);
-          }
-        }
-
-        if (typeof data.systemPrompt === 'string' && data.systemPrompt.length > 10 * 1024) {
-          console.error(`❌ System prompt exceeds 10KB limit (${data.systemPrompt.length} bytes).`);
-          process.exit(1);
-        }
+        // Validate using the shared lens validator (same rules as registry loading)
+        validateLens(data, lensPath); // throws on invalid
 
         // Check for ID conflicts with built-ins
         const builtins = registry.getBuiltinLenses();

@@ -8,13 +8,36 @@ import { qualityLens } from './builtin/quality.js';
 const BUILTIN_LENSES: Lens[] = [securityLens, architectureLens, qualityLens];
 const MAX_PROMPT_BYTES = 10 * 1024; // 10KB
 
-function validateLens(data: unknown, source: string): Lens {
+/**
+ * Shared validator for custom lens objects.
+ * Used by both registry loading and the CLI `lenses add` command.
+ * Throws a descriptive Error if the lens is invalid.
+ */
+export function validateLens(data: unknown, source: string): Lens {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`Custom lens from ${source} must be a JSON object.`);
+  }
+
   const obj = data as Record<string, unknown>;
 
-  const required = ['id', 'name', 'description', 'systemPrompt', 'focusAreas'];
-  for (const field of required) {
-    if (!obj[field]) {
-      throw new Error(`Custom lens from ${source} is missing required field: "${field}"`);
+  const stringFields = ['id', 'name', 'description', 'systemPrompt'];
+  for (const field of stringFields) {
+    if (!obj[field] || typeof obj[field] !== 'string') {
+      throw new Error(
+        `Custom lens from ${source} is missing required string field: "${field}"`
+      );
+    }
+  }
+
+  // focusAreas must be an array of strings
+  if (!Array.isArray(obj.focusAreas)) {
+    throw new Error(`Custom lens "${obj.id}" — focusAreas must be an array.`);
+  }
+  for (let i = 0; i < obj.focusAreas.length; i++) {
+    if (typeof obj.focusAreas[i] !== 'string') {
+      throw new Error(
+        `Custom lens "${obj.id}" — focusAreas[${i}] must be a string, got ${typeof obj.focusAreas[i]}.`
+      );
     }
   }
 
@@ -23,10 +46,6 @@ function validateLens(data: unknown, source: string): Lens {
       `Custom lens "${obj.id}" has a system prompt exceeding ${MAX_PROMPT_BYTES} bytes. ` +
       `This may cause excessive token usage.`
     );
-  }
-
-  if (!Array.isArray(obj.focusAreas)) {
-    throw new Error(`Custom lens "${obj.id}" focusAreas must be an array.`);
   }
 
   return obj as unknown as Lens;

@@ -11,8 +11,18 @@ export class LLMError extends Error {
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 403, 404]);
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
 }
 
 function jitter(ms: number): number {
@@ -26,28 +36,43 @@ export class LLMClient {
 
   constructor(config: LLMConfig) {
     this.config = config;
+    // Only OpenAI is supported in v1. Anthropic support is planned for v2.
+    if (config.provider !== 'openai') {
+      throw new LLMError(
+        `Provider "${config.provider}" is not supported in v1. ` +
+        `Only "openai" is available. Set LLM_PROVIDER=openai (or leave unset).`
+      );
+    }
     this.client = new OpenAI({
       apiKey: config.apiKey,
       timeout: config.timeout * 1000,
     });
   }
 
-  async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<string> {
     const maxAttempts = 3;
     const baseDelayMs = 1000;
 
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Check if already aborted before attempting
+      if (signal?.aborted) {
+        throw new LLMError('LLM request was cancelled');
+      }
+
       try {
-        const response = await this.client.chat.completions.create({
-          model: this.config.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.1, // Low temperature for consistent structured output
-        });
+        const response = await this.client.chat.completions.create(
+          {
+            model: this.config.model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.1, // Low temperature for consistent structured output
+          },
+          { signal }
+        );
 
         const content = response.choices[0]?.message?.content;
         if (!content) {
@@ -57,6 +82,11 @@ export class LLMClient {
         return content;
       } catch (err: unknown) {
         lastError = err;
+
+        // If aborted, stop immediately
+        if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+          throw new LLMError('LLM request was cancelled');
+        }
 
         // Check if it's an OpenAI API error with a status code
         const apiError = err as { status?: number; message?: string; headers?: Record<string, string> };
@@ -94,7 +124,7 @@ export class LLMClient {
         }
 
         if (attempt < maxAttempts) {
-          await sleep(delayMs);
+          await sleep(delayMs, signal);
         }
       }
     }

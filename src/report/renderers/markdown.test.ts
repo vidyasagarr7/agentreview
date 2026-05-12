@@ -26,6 +26,7 @@ const baseReport: ConsolidatedReport = {
     parseErrorLenses: [],
   },
   confidence: 'NORMAL',
+  skippedFiles: [],
 };
 
 const criticalFinding = {
