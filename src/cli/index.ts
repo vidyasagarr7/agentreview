@@ -18,6 +18,7 @@ import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
 import { runEnsemble } from '../ensemble/index.js';
 import { renderEnsembleReport } from '../ensemble/renderer.js';
+import { buildCodebaseContext } from '../codebase/index.js';
 import type { FindingSeverity, ReportFormat } from '../types/index.js';
 import { SEVERITY_ORDER } from '../types/index.js';
 
@@ -35,6 +36,8 @@ async function reviewPR(prUrl: string, opts: {
   validate: boolean;
   minConfidence: number;
   ensemble?: string;
+  codebaseContext: boolean;
+  codebaseBudget: number;
   yes: boolean;
   output?: string;
 }): Promise<void> {
@@ -131,8 +134,31 @@ async function reviewPR(prUrl: string, opts: {
     process.exit(1);
   }
 
+  // ── Fetch codebase context ───────────────────────────────────────────────
+  let codebaseCtx;
+  if (opts.codebaseContext) {
+    const cbSpinner = ora('Fetching codebase context…').start();
+    try {
+      codebaseCtx = await buildCodebaseContext(pr, githubClient, {
+        enabled: true,
+        budgetTokens: opts.codebaseBudget,
+        verbose: opts.verbose,
+      });
+      if (codebaseCtx) {
+        cbSpinner.succeed(`Codebase context: ${codebaseCtx.filesAnalyzed} files analyzed, ~${codebaseCtx.estimatedTokens} tokens`);
+      } else {
+        cbSpinner.warn('Codebase context unavailable (degraded gracefully)');
+      }
+    } catch {
+      cbSpinner.warn('Codebase context failed (review continues without it)');
+    }
+  }
+
   // ── Build review context ──────────────────────────────────────────────────
   const context = buildReviewContext(pr, pr.diff, pr.files, llmConfig.contextTokens);
+  if (codebaseCtx) {
+    context.codebase = codebaseCtx;
+  }
 
   if (opts.verbose) {
     console.error(`📊 Context: ~${context.estimatedTokens} tokens${context.truncated ? ' (truncated)' : ''}`);
@@ -360,6 +386,20 @@ program
     'Run multi-model ensemble review (comma-separated: claude-sonnet-4-20250514,gpt-4o)'
   )
   .option(
+    '--codebase-context',
+    'Enable codebase awareness (repo tree + import graph) (default: true)',
+    true
+  )
+  .option(
+    '--no-codebase-context',
+    'Disable codebase awareness'
+  )
+  .option(
+    '--codebase-budget <tokens>',
+    'Token budget for codebase context (default: 8000)',
+    (v: string) => parseInt(v, 10)
+  )
+  .option(
     '-v, --verbose',
     'Enable verbose progress output',
     false
@@ -390,6 +430,8 @@ program
         validate: opts.validate,
         minConfidence: opts.minConfidence ?? 40,
         ensemble: opts.ensemble,
+        codebaseContext: opts.codebaseContext,
+        codebaseBudget: opts.codebaseBudget ?? 8000,
         yes: opts.yes,
         output: opts.output,
       });

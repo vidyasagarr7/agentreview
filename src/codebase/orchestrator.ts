@@ -24,6 +24,16 @@ export async function buildCodebaseContext(
     const repo = pr.repoName;
     const baseSha = await gh.getBaseSha(owner, repo, pr.number);
 
+    // Codebase context is built from the base branch; files added by this PR
+    // won't exist at baseSha and therefore cannot be analyzed (Bug 5)
+    const addedFiles = pr.files.filter((f) => f.status === 'added');
+    if (addedFiles.length > 0) {
+      diagnostics.push({
+        level: 'info',
+        message: 'Codebase context reflects the base branch; newly added files in this PR are not analyzed.',
+      });
+    }
+
     const fetcher = new CodebaseFetcher(gh, owner, repo, baseSha, {
       maxFiles: 30,
       concurrency: 5,

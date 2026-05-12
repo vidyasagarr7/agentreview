@@ -37,15 +37,70 @@ function parseSymbolList(raw: string): string[] {
     .filter(Boolean);
 }
 
+// ─── Comment stripper ───────────────────────────────────────────────────────
+
+/**
+ * Strip single-line (//) and block (/* *\/) comments from source,
+ * preserving newlines so line numbers stay intact.
+ * String literals containing // or /* are left untouched.
+ */
+function stripComments(source: string): string {
+  let result = '';
+  let i = 0;
+  const len = source.length;
+  while (i < len) {
+    const ch = source[i];
+    // String literals — copy verbatim, including any // or /* inside
+    if (ch === '"' || ch === "'" || ch === '`') {
+      result += ch;
+      i++;
+      while (i < len) {
+        const c = source[i];
+        if (c === '\\') {
+          // escape sequence — preserve both chars
+          result += source[i] + (source[i + 1] ?? '');
+          i += 2;
+        } else {
+          result += c;
+          i++;
+          if (c === ch) break; // closing quote
+        }
+      }
+    }
+    // Block comment  /* ... */
+    else if (ch === '/' && source[i + 1] === '*') {
+      i += 2;
+      while (i < len && !(source[i] === '*' && source[i + 1] === '/')) {
+        if (source[i] === '\n') result += '\n'; // preserve newlines
+        i++;
+      }
+      i += 2; // skip closing */
+    }
+    // Single-line comment  // ...
+    else if (ch === '/' && source[i + 1] === '/') {
+      while (i < len && source[i] !== '\n') i++;
+    }
+    else {
+      result += ch;
+      i++;
+    }
+  }
+  return result;
+}
+
 // ─── Import parser ────────────────────────────────────────────────────────────
 
 export function parseImports(source: string): RawImport[] {
   const results: RawImport[] = [];
 
-  // Collapse multi-line import statements into single lines for easier regex matching.
-  // Strategy: join lines that look like they're mid-import (have unclosed braces).
-  const collapsed = source.replace(/import\s+[^;'"]*\{[^}]*\}/gs, (match) =>
-    match.replace(/\s*\n\s*/g, ' '),
+  // Strip comments first so commented-out imports are not parsed.
+  const stripped = stripComments(source);
+
+  // Collapse multi-line import statements into single lines.
+  // Match full `import ... ;` spans (including newlines) and join them.
+  const collapsed = stripped.replace(
+    /import\b[^;]+;/g,
+    (match) => match.replace(/\s*\n\s*/g, ' '),
   );
 
   const lines = collapsed.split('\n');
@@ -131,6 +186,15 @@ export function parseImports(source: string): RawImport[] {
       }
     }
 
+    // ── export * from 'y' / export * as X from 'y' (barrel re-exports) ───────
+    {
+      const m = trimmed.match(/^export\s+\*(?:\s+as\s+\w+)?\s+from\s+(['"])([^'"]+)\1/);
+      if (m) {
+        results.push({ module: m[2], isTypeOnly: false });
+        continue;
+      }
+    }
+
     // ── require('y') ─────────────────────────────────────────────────────────
     {
       // Match require anywhere in the line (assignments, etc.)
@@ -150,7 +214,7 @@ export function parseImports(source: string): RawImport[] {
 export function parseExports(source: string): RawExport[] {
   const results: RawExport[] = [];
 
-  const lines = source.split('\n');
+  const lines = stripComments(source).split('\n');
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -189,6 +253,17 @@ export function parseExports(source: string): RawExport[] {
       }
     }
 
+    // ── export enum Name / export const enum Name ─────────────────────────────
+    // Must come BEFORE the const/let/var matcher to avoid `export const enum Foo`
+    // being captured as a const named "enum".
+    {
+      const m = trimmed.match(/^export\s+(?:const\s+)?enum\s+(\w+)/);
+      if (m) {
+        results.push({ name: m[1], kind: 'other' });
+        continue;
+      }
+    }
+
     // ── export const / export let / export var ───────────────────────────────
     {
       const m = trimmed.match(/^export\s+(?:const|let|var)\s+(\w+)/);
@@ -205,15 +280,6 @@ export function parseExports(source: string): RawExport[] {
         for (const sym of parseSymbolList(m[1])) {
           results.push({ name: sym, kind: 'other' });
         }
-        continue;
-      }
-    }
-
-    // ── export enum Name ─────────────────────────────────────────────────────
-    {
-      const m = trimmed.match(/^export\s+(?:const\s+)?enum\s+(\w+)/);
-      if (m) {
-        results.push({ name: m[1], kind: 'other' });
         continue;
       }
     }
