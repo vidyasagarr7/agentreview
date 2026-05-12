@@ -1,5 +1,5 @@
 import { Octokit } from '@octokit/rest';
-import type { PRData, ChangedFile } from '../types/index.js';
+import type { PRData, ChangedFile, RepoTree, RepoFileEntry } from '../types/index.js';
 
 export class GitHubAuthError extends Error {
   constructor(statusCode = 401) {
@@ -182,5 +182,44 @@ export class GitHubClient {
     } else {
       await this.postComment(owner, repo, number, markedBody);
     }
+  }
+
+  async getRepoTree(owner: string, repo: string, sha: string): Promise<RepoTree> {
+    const { data } = await this.octokit.rest.git.getTree({
+      owner,
+      repo,
+      tree_sha: sha,
+      recursive: 'true',
+    });
+    const entries: RepoFileEntry[] = (data.tree ?? []).map((item) => ({
+      path: item.path ?? '',
+      type: (item.type === 'tree' ? 'tree' : 'blob') as 'blob' | 'tree',
+      size: item.size ?? undefined,
+    }));
+    return {
+      sha: data.sha,
+      entries,
+      truncated: data.truncated ?? false,
+    };
+  }
+
+  async getFileContent(owner: string, repo: string, path: string, ref: string): Promise<string | null> {
+    try {
+      const { data } = await this.octokit.rest.repos.getContent({ owner, repo, path, ref });
+      // directories return an array
+      if (Array.isArray(data)) return null;
+      if (data.type !== 'file') return null;
+      // skip large binary files
+      if ((data.size ?? 0) > 512000) return null;
+      if (!('content' in data) || !data.content) return null;
+      return Buffer.from(data.content, 'base64').toString('utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  async getBaseSha(owner: string, repo: string, prNumber: number): Promise<string> {
+    const { data } = await this.octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    return data.base.sha;
   }
 }
