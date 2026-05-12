@@ -152,3 +152,32 @@ This should block shipping a CLI package.
 **NO SHIP.**
 
 The commit fixed several important defects and the requested `npm run typecheck` / `npm test` checks pass, but the fix set is incomplete and the built CLI is not runnable. At minimum, fix the build/bin/shebang problem and implement or consciously remove the promised `terminal` output format before shipping.
+
+## Round 2 Verification
+
+Verification target: commit `d8654cc`.
+
+### Required fix checks
+
+| Check | Result |
+|---|---|
+| `npm run build` emits `dist/cli/index.js`, not `.cjs` | ✅ Pass. Build exits 0 and emits only `dist/cli/index.js`. |
+| `node dist/cli/index.js --help` works | ✅ Pass. Help renders successfully with exit 0. |
+| `tsup.config.ts` uses ESM and has the only shebang | ✅ Pass. `format: ['esm']`; generated artifact has a single shebang from the tsup banner, and `src/cli/index.ts` has no source shebang. |
+| `--timeout` no longer hardcodes Commander default `60` | ✅ Pass. The option has no `.default(60)`, and the action resolves `opts.timeout ?? config.getTimeout()`. |
+| `AGENTREVIEW_TIMEOUT` falls back through `ConfigManager` | ✅ Pass. `ConfigManager.getTimeout()` reads `AGENTREVIEW_TIMEOUT` and falls back to 60 only when unset. |
+| `docs/specs/agent-review-design.md` removes terminal format | ❌ Fail. `terminal` is no longer listed as a supported CLI choice, but the spec still references terminal output in the architecture diagram, renderer section note, non-TTY behavior, sample config (`"format": "terminal"`), and dependency table. |
+
+### Verification commands
+
+| Command | Result |
+|---|---|
+| `npm run build` | ✅ Pass, exit 0 |
+| `node dist/cli/index.js --help` | ✅ Pass, exit 0 |
+| `npm run typecheck && npm test` | ✅ Pass, exit 0; 10 test files and 71 tests passed |
+
+### Round 2 verdict
+
+**NO SHIP.**
+
+The two blocking runtime defects from Round 1 are fixed: the built CLI is now runnable as `dist/cli/index.js`, and the timeout flag no longer masks `AGENTREVIEW_TIMEOUT`. However, the final verification request explicitly required the design spec to remove the terminal format, and that cleanup is incomplete. At minimum, remove or rewrite the remaining terminal-format references in `docs/specs/agent-review-design.md` before shipping.
