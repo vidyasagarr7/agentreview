@@ -77,7 +77,7 @@
 │  • Deduplicate overlapping findings                 │
 │  • Map severity to unified scale (CRITICAL→INFO)    │
 │  • Sort by severity, then lens                      │
-│  • Render: markdown / JSON / terminal color         │
+│  • Render: markdown / JSON                          │
 └──────────────────────┬──────────────────────────────┘
                        │
                        ▼
@@ -384,7 +384,7 @@ agentreview lenses add ./my-lens.json
 - Monorepo PRs (hundreds of files): Warn about cost, require `--confirm-large` flag if >50 files.
 
 ### Output edge cases
-- stdout is a pipe (non-TTY): Use `markdown` format by default (not `terminal`).
+- stdout is a pipe (non-TTY): Use `markdown` format by default.
 - `--post` fails (no write permission): Fall back to printing to stdout, log error.
 - Partial results (some agents errored): Always produce a report, annotate with which lenses succeeded.
 
@@ -404,7 +404,7 @@ agentreview lenses add ./my-lens.json
   },
   "defaults": {
     "lenses": ["security", "architecture", "quality"],
-    "format": "terminal",
+    "format": "markdown",
     "failOn": null
   }
 }
@@ -433,7 +433,7 @@ agentreview lenses add ./my-lens.json
 | CLI framework | `commander` | Lightweight, battle-tested |
 | GitHub API | `@octokit/rest` | Official SDK, handles auth/pagination |
 | LLM calls | `openai` SDK | Supports OpenAI-compatible endpoints |
-| Output | `chalk` + `marked` | Terminal colors + markdown rendering |
+| Output | `marked` | Markdown rendering |
 | Config | `conf` | XDG-compliant config storage |
 | Testing | `vitest` | Fast, zero-config, ESM-native |
 | Build | `tsup` | Single-file CJS+ESM output, fast |
