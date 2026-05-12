@@ -1,0 +1,139 @@
+// ─── Core Data Shapes ────────────────────────────────────────────────────────
+
+export interface ChangedFile {
+  filename: string;
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+}
+
+export interface PRData {
+  title: string;
+  body: string;
+  author: string;
+  baseBranch: string;
+  headBranch: string;
+  labels: string[];
+  diff: string;
+  files: ChangedFile[];
+  additions: number;
+  deletions: number;
+  number: number;
+  repoOwner: string;
+  repoName: string;
+  isDraft: boolean;
+  state: 'open' | 'closed' | 'merged';
+}
+
+export interface ReviewContext {
+  pr: PRData;
+  diff: string;
+  fileList: string;
+  truncated: boolean;
+  truncationNote?: string;
+  estimatedTokens: number;
+}
+
+// ─── Lens Types ───────────────────────────────────────────────────────────────
+
+export type LensSeverity = 'strict' | 'normal' | 'advisory';
+
+export interface Lens {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  focusAreas: string[];
+  severity?: LensSeverity;
+}
+
+// ─── Finding Types ────────────────────────────────────────────────────────────
+
+export type FindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+
+export const SEVERITY_ORDER: FindingSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+
+export interface AgentFinding {
+  id: string;
+  severity: FindingSeverity;
+  category: string;
+  location: string;
+  summary: string;
+  detail: string;
+  suggestion: string;
+  lenses: string[];
+}
+
+export interface ParseError {
+  type: 'ParseError';
+  lensId: string;
+  raw: string;
+  message: string;
+}
+
+export type AgentResultFindings = AgentFinding[] | ParseError;
+
+export interface AgentResult {
+  lensId: string;
+  findings: AgentResultFindings;
+  error?: string;
+  durationMs: number;
+}
+
+// ─── Report Types ─────────────────────────────────────────────────────────────
+
+export type ReportFormat = 'markdown' | 'json';
+export type ReviewConfidence = 'NORMAL' | 'LOW';
+
+export interface FindingStats {
+  total: number;
+  bySeverity: Record<FindingSeverity, number>;
+  byLens: Record<string, number>;
+  cleanLenses: string[];
+  erroredLenses: string[];
+  parseErrorLenses: string[];
+}
+
+export interface ConsolidatedReport {
+  pr: {
+    title: string;
+    number: number;
+    author: string;
+    repoOwner: string;
+    repoName: string;
+    filesChanged: number;
+    additions: number;
+    deletions: number;
+  };
+  reviewedAt: string;
+  lensesRun: string[];
+  findings: AgentFinding[];
+  parseErrors: ParseError[];
+  stats: FindingStats;
+  confidence: ReviewConfidence;
+}
+
+// ─── Config Types ─────────────────────────────────────────────────────────────
+
+export interface LLMConfig {
+  provider: 'openai' | 'anthropic';
+  model: string;
+  apiKey: string;
+  timeout: number;
+  contextTokens: number;
+}
+
+export interface CLIOptions {
+  lens: string;
+  format: ReportFormat;
+  output?: string;
+  post: boolean;
+  failOn?: FindingSeverity;
+  timeout: number;
+  model?: string;
+  noDedup: boolean;
+  verbose: boolean;
+  yes: boolean;
+}
