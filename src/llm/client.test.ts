@@ -23,6 +23,17 @@ vi.mock('openai', () => {
   };
 });
 
+// Mock the Anthropic module
+vi.mock('@anthropic-ai/sdk', () => {
+  return {
+    default: vi.fn().mockImplementation(() => ({
+      messages: {
+        create: vi.fn(),
+      },
+    })),
+  };
+});
+
 describe('LLMClient', () => {
   it('returns content on success', async () => {
     const OpenAI = (await import('openai')).default;

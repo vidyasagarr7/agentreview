@@ -19,10 +19,18 @@ const MODEL_CONTEXT_TOKENS: Record<string, number> = {
   'gpt-4-turbo-preview': 128000,
   'gpt-4': 8192,
   'gpt-3.5-turbo': 16385,
+  'claude-sonnet-4-20250514': 200000,
   'claude-3-5-sonnet-20241022': 200000,
   'claude-3-opus-20240229': 200000,
   'claude-3-haiku-20240307': 200000,
 };
+
+const SUPPORTED_PROVIDERS = new Set(['openai', 'anthropic']);
+
+function detectProvider(model: string): 'openai' | 'anthropic' {
+  if (model.startsWith('claude')) return 'anthropic';
+  return 'openai';
+}
 
 const DEFAULT_MODEL_CONTEXT = 128000;
 
@@ -43,31 +51,38 @@ export class ConfigManager {
   }
 
   getLLMConfig(modelOverride?: string): LLMConfig {
-    const rawProvider = process.env.LLM_PROVIDER ?? 'openai';
     const model = modelOverride ?? process.env.AGENTREVIEW_MODEL ?? 'gpt-4o';
     const timeout = parseInt(process.env.AGENTREVIEW_TIMEOUT ?? '60', 10);
 
-    // Only OpenAI is supported in v1.
-    if (rawProvider !== 'openai') {
+    // Auto-detect provider from model name, or use explicit LLM_PROVIDER
+    const rawProvider = process.env.LLM_PROVIDER ?? detectProvider(model);
+
+    if (!SUPPORTED_PROVIDERS.has(rawProvider)) {
       throw new ConfigError(
-        `LLM provider "${rawProvider}" is not supported in v1. ` +
-        `Only "openai" is available. Anthropic support is planned for v2.\n` +
-        `Set LLM_PROVIDER=openai (or leave unset).`
+        `LLM provider "${rawProvider}" is not supported. ` +
+        `Use "openai" or "anthropic". Set LLM_PROVIDER=openai or LLM_PROVIDER=anthropic.`
       );
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const provider = rawProvider as 'openai' | 'anthropic';
+
+    // Resolve API key based on provider
+    const apiKey = provider === 'anthropic'
+      ? process.env.ANTHROPIC_API_KEY
+      : process.env.OPENAI_API_KEY;
+
     if (!apiKey) {
+      const envVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
       throw new ConfigError(
-        'OpenAI API key not found.\n\n' +
-        'Set the OPENAI_API_KEY environment variable:\n' +
-        '  export OPENAI_API_KEY=sk-...\n\n' +
-        'Or add OPENAI_API_KEY=sk-... to a .env file in your current directory.'
+        `${envVar} not found.\n\n` +
+        `Set the ${envVar} environment variable:\n` +
+        `  export ${envVar}=...\n\n` +
+        `Or add ${envVar}=... to a .env file in your current directory.`
       );
     }
 
     return {
-      provider: 'openai',
+      provider,
       model,
       apiKey,
       timeout,
