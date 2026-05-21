@@ -167,7 +167,7 @@ agentreview https://github.com/owner/repo/pull/123 --fail-on HIGH --yes
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--format <format>` | `markdown` | Output format: `markdown`, `json`, or `sarif` |
 | `--lenses <ids>` | `all` | Comma-separated lens IDs or `all` |
 | `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
 | `--timeout <seconds>` | `60` | Per-agent timeout |

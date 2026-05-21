@@ -331,7 +331,7 @@ program
   .argument('<pr-url>', 'GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)')
   .addOption(
     new Option('--format <format>', 'Output format')
-      .choices(['markdown', 'json'])
+      .choices(['markdown', 'json', 'sarif'])
       .default(new ConfigManager().getDefaultFormat())
   )
   .option(

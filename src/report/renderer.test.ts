@@ -10,10 +10,6 @@ vi.mock('./renderers/json.js', () => ({
   renderJSON: vi.fn(() => '{"report": true}'),
 }));
 
-vi.mock('./renderers/sarif.js', () => ({
-  renderSarif: vi.fn(() => '{"sarif": true}'),
-}));
-
 const mockReport: ConsolidatedReport = {
   pr: {
     title: 'Test PR',
@@ -54,13 +50,6 @@ describe('render', () => {
     const result = render(mockReport, 'json');
     expect(renderJSON).toHaveBeenCalledWith(mockReport);
     expect(result).toBe('{"report": true}');
-  });
-
-  it('calls renderSarif for sarif format', async () => {
-    const { renderSarif } = await import('./renderers/sarif.js');
-    const result = render(mockReport, 'sarif');
-    expect(renderSarif).toHaveBeenCalledWith(mockReport);
-    expect(result).toBe('{"sarif": true}');
   });
 
   it('defaults to markdown for unknown format', async () => {

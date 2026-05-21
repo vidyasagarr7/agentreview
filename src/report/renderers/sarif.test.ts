@@ -45,19 +45,15 @@ describe('mapSeverity', () => {
   it('maps CRITICAL to error', () => {
     expect(mapSeverity('CRITICAL')).toBe('error');
   });
-
   it('maps HIGH to error', () => {
     expect(mapSeverity('HIGH')).toBe('error');
   });
-
   it('maps MEDIUM to warning', () => {
     expect(mapSeverity('MEDIUM')).toBe('warning');
   });
-
   it('maps LOW to note', () => {
     expect(mapSeverity('LOW')).toBe('note');
   });
-
   it('maps INFO to note', () => {
     expect(mapSeverity('INFO')).toBe('note');
   });
@@ -67,11 +63,9 @@ describe('parseLocation', () => {
   it('parses file:line format', () => {
     expect(parseLocation('src/auth.ts:42')).toEqual({ file: 'src/auth.ts', line: 42 });
   });
-
   it('handles file without line number', () => {
     expect(parseLocation('src/auth.ts')).toEqual({ file: 'src/auth.ts', line: 1 });
   });
-
   it('handles deeply nested paths', () => {
     expect(parseLocation('src/a/b/c.ts:100')).toEqual({ file: 'src/a/b/c.ts', line: 100 });
   });
@@ -80,7 +74,6 @@ describe('parseLocation', () => {
 describe('renderSarif', () => {
   it('produces valid SARIF 2.1.0 structure', () => {
     const output = JSON.parse(renderSarif(baseReport));
-
     expect(output.$schema).toBe(
       'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json',
     );
@@ -91,7 +84,6 @@ describe('renderSarif', () => {
 
   it('produces valid SARIF with empty findings', () => {
     const output = JSON.parse(renderSarif(baseReport));
-
     expect(output.runs[0].results).toEqual([]);
     expect(output.runs[0].tool.driver.rules).toEqual([]);
   });
@@ -102,27 +94,20 @@ describe('renderSarif', () => {
       findings: [finding],
       stats: { ...baseReport.stats, total: 1, bySeverity: { ...baseReport.stats.bySeverity, HIGH: 1 } },
     };
-
     const output = JSON.parse(renderSarif(report));
     const result = output.runs[0].results[0];
     const rule = output.runs[0].tool.driver.rules[0];
 
-    // Result mapping
     expect(result.ruleId).toBe('SEC-001');
     expect(result.level).toBe('error');
     expect(result.message.text).toContain('Missing token validation');
     expect(result.message.text).toContain('Suggestion:');
-
-    // Location mapping
     expect(result.locations[0].physicalLocation.artifactLocation.uri).toBe('src/auth.ts');
     expect(result.locations[0].physicalLocation.region.startLine).toBe(42);
-
-    // Properties
     expect(result.properties.category).toBe('authentication');
     expect(result.properties.confidence).toBe(85);
     expect(result.properties.lenses).toEqual(['security']);
 
-    // Rule mapping
     expect(rule.id).toBe('SEC-001');
     expect(rule.shortDescription.text).toBe('Missing token validation');
     expect(rule.defaultConfiguration.level).toBe('error');
@@ -132,7 +117,6 @@ describe('renderSarif', () => {
   it('includes PR metadata in invocations', () => {
     const output = JSON.parse(renderSarif(baseReport));
     const invocation = output.runs[0].invocations[0];
-
     expect(invocation.executionSuccessful).toBe(true);
     expect(invocation.properties.pr).toBe('acme/api#42');
     expect(invocation.properties.reviewedAt).toBe('2026-05-12T01:00:00Z');
@@ -145,10 +129,8 @@ describe('renderSarif', () => {
       { ...finding, id: 'SEC-003', severity: 'LOW' as const },
       { ...finding, id: 'SEC-004', severity: 'INFO' as const },
     ];
-
     const report = { ...baseReport, findings };
     const output = JSON.parse(renderSarif(report));
-
     expect(output.runs[0].results).toHaveLength(4);
     expect(output.runs[0].results[0].level).toBe('error');
     expect(output.runs[0].results[1].level).toBe('warning');
@@ -161,10 +143,8 @@ describe('renderSarif', () => {
       ...baseReport,
       findings: [{ ...finding, location: 'README.md' }],
     };
-
     const output = JSON.parse(renderSarif(report));
     const loc = output.runs[0].results[0].locations[0].physicalLocation;
-
     expect(loc.artifactLocation.uri).toBe('README.md');
     expect(loc.region.startLine).toBe(1);
   });
