@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import type { LLMConfig } from '../types/index.js';
 
 export class LLMError extends Error {
@@ -103,16 +104,42 @@ class AnthropicProvider implements LLMProvider {
   }
 }
 
+class GeminiProvider implements LLMProvider {
+  private client: GoogleGenAI;
+  constructor(private config: LLMConfig) {
+    this.client = new GoogleGenAI({ apiKey: config.apiKey });
+  }
+
+  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string> {
+    const response = await this.client.models.generateContent({
+      model: this.config.model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: options?.maxTokens ?? 4096,
+        temperature: 0.1,
+      },
+    });
+    const text = response.text;
+    if (!text) {
+      throw new LLMError('LLM returned empty response');
+    }
+    return text;
+  }
+}
+
 function createProvider(config: LLMConfig): LLMProvider {
   switch (config.provider) {
     case 'openai':
       return new OpenAIProvider(config);
     case 'anthropic':
       return new AnthropicProvider(config);
+    case 'google':
+      return new GeminiProvider(config);
     default:
       throw new LLMError(
         `Provider "${config.provider}" is not supported. ` +
-        `Use "openai" or "anthropic". Set LLM_PROVIDER=openai or LLM_PROVIDER=anthropic.`
+        `Use "openai", "anthropic", or "google". Set LLM_PROVIDER=openai, LLM_PROVIDER=anthropic, or LLM_PROVIDER=google.`
       );
   }
 }

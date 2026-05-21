@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **SARIF 2.1.0 output format** (`--format sarif`) — Outputs findings in [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) format for GitHub Code Scanning integration. Findings appear inline in PR diffs and in the repository Security tab. Works with both PR review and codebase scan commands. Upload via `github/codeql-action/upload-sarif@v3`.
+
 - **Confidence scoring & validation gates** — Findings are re-evaluated for accuracy; low-confidence results are automatically filtered. Configurable via `--validate`, `--no-validate`, and `--min-confidence <score>`.
 
 - **Auto-fix command** (`agentreview fix`) — Review → validate → generate patch → apply → verify → revert pipeline. Supports `--dry-run` for patch preview and `--min-confidence` to limit fixes to high-confidence findings.
@@ -29,6 +31,8 @@ All notable changes to this project will be documented in this file.
   - `pr-number` override for `workflow_dispatch` and `issue_comment` triggers
   - `custom-lenses-dir` support (requires `actions/checkout`)
   - `pull_request_target` security documentation
+
+- **Google Gemini provider support** — Use `gemini-*` models with `GEMINI_API_KEY` (CLI) or `google-api-key` (GitHub Action). Auto-detected from model name. Supports 1M context window.
 
 - **Anthropic provider support** — Auto-detects provider from model name (`claude-*` → Anthropic, `gpt-*`/`o1-*`/`o3-*` → OpenAI). Supports both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
