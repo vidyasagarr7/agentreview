@@ -15,7 +15,8 @@
     "test": "tsc --noEmit && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "build:action": "tsup --config tsup.config.action.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
@@ -27,6 +28,8 @@
     "p-limit": "^7.3.0"
   },
   "devDependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
     "@types/node": "^20.14.0",
     "tsup": "^8.2.4",
     "typescript": "^5.5.3",

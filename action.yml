@@ -1,0 +1,82 @@
+# Required permissions:
+#   contents: read
+#   pull-requests: write
+
+name: 'AgentReview'
+description: 'AI-powered multi-lens code review for pull requests — security, architecture, quality'
+author: 'vidyasagarr7'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API key (required if not using openai-api-key)'
+    required: false
+  openai-api-key:
+    description: 'OpenAI API key (required if not using anthropic-api-key)'
+    required: false
+  model:
+    description: 'LLM model to use'
+    required: false
+    default: 'claude-sonnet-4-20250514'
+  lenses:
+    description: 'Comma-separated lenses to run (security,architecture,quality) or "all"'
+    required: false
+    default: 'all'
+  fail-on:
+    description: 'Fail if findings at or above this severity (CRITICAL|HIGH|MEDIUM|LOW|INFO)'
+    required: false
+  validate:
+    description: 'Enable confidence scoring and validation'
+    required: false
+    default: 'true'
+  min-confidence:
+    description: 'Minimum confidence score (0-100) to keep a finding'
+    required: false
+    default: '40'
+  codebase-context:
+    description: 'Enable codebase awareness (repo tree + import graph)'
+    required: false
+    default: 'true'
+  codebase-budget:
+    description: 'Token budget for codebase context'
+    required: false
+    default: '8000'
+  verbose:
+    description: 'Enable verbose logging'
+    required: false
+    default: 'false'
+  custom-lenses-dir:
+    description: 'Path to custom lens JSON files (requires actions/checkout first)'
+    required: false
+  github-token:
+    description: 'GitHub token for API access'
+    required: false
+    default: '${{ github.token }}'
+  pr-number:
+    description: 'Override PR number (for workflow_dispatch or issue_comment triggers)'
+    required: false
+  comment-mode:
+    description: 'Comment mode: full, summary, or collapsed'
+    required: false
+    default: 'full'
+
+outputs:
+  findings-count:
+    description: 'Total number of findings'
+  critical-count:
+    description: 'Number of CRITICAL findings'
+  high-count:
+    description: 'Number of HIGH findings'
+  review-comment-id:
+    description: 'ID of the posted PR comment'
+  report:
+    description: 'Full markdown report (may be truncated if >1MB)'
+  exit-code:
+    description: '0 if clean, 2 if findings above fail-on threshold'
+
+runs:
+  using: 'node20'
+  main: 'action/dist/index.cjs'
