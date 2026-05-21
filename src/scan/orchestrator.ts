@@ -21,8 +21,8 @@ import { discoverFiles } from './discovery.js';
 import { chunkFiles } from './chunker.js';
 import { buildScanPrompt } from './prompts.js';
 import { dedupScanFindings } from './dedup-scan.js';
-import { redactSecrets } from './redact.js';
 import { loadBaseline, saveBaseline, filterNewFindings, createBaseline } from './baseline.js';
+import { redactSecrets } from './redact.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
@@ -163,12 +163,7 @@ function buildCoverageFromChunks(chunks: ScanChunk[], chunkResults: ChunkResult[
 
 export async function scanCodebase(
   target: string,
-  options: ScanOptions & {
-    onProgress?: ScanProgressCallback;
-    baseline?: string;
-    updateBaseline?: boolean;
-    baselinePath?: string;
-  },
+  options: ScanOptions & { onProgress?: ScanProgressCallback; baseline?: string; updateBaseline?: boolean; baselinePath?: string },
   llm: LLMClient,
   config: { token?: string; branch?: string },
 ): Promise<ScanResult> {

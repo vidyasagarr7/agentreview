@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 - **Incremental scan with baseline** (`--baseline`, `--update-baseline`, `--baseline-path`) — First scan creates a baseline of existing findings. Subsequent scans only report NEW findings not in the baseline, preventing teams from being overwhelmed by pre-existing issues when adopting the tool. Suppressed finding counts shown in reports and CLI summary.
 
+<<<<<<< HEAD
+=======
+### Added
+
+>>>>>>> adabc40 (feat: incremental scan with baseline — suppress pre-existing findings)
 - **SARIF 2.1.0 output format** (`--format sarif`) — Outputs findings in [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) format for GitHub Code Scanning integration. Findings appear inline in PR diffs and in the repository Security tab. Works with both PR review and codebase scan commands. Upload via `github/codeql-action/upload-sarif@v3`.
 
 - **Confidence scoring & validation gates** — Findings are re-evaluated for accuracy; low-confidence results are automatically filtered. Configurable via `--validate`, `--no-validate`, and `--min-confidence <score>`.
