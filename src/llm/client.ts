@@ -30,8 +30,12 @@ function jitter(ms: number): number {
   return ms * (0.75 + Math.random() * 0.5);
 }
 
+export interface LLMCompleteOptions {
+  maxTokens?: number;
+}
+
 interface LLMProvider {
-  complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<string>;
+  complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string>;
 }
 
 class OpenAIProvider implements LLMProvider {
@@ -43,16 +47,20 @@ class OpenAIProvider implements LLMProvider {
     });
   }
 
-  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<string> {
+  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string> {
+    const requestBody: OpenAI.ChatCompletionCreateParamsNonStreaming = {
+      model: this.config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.1,
+    };
+    if (options?.maxTokens != null) {
+      requestBody.max_tokens = options.maxTokens;
+    }
     const response = await this.client.chat.completions.create(
-      {
-        model: this.config.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-      },
+      requestBody,
       { signal }
     );
 
@@ -73,11 +81,11 @@ class AnthropicProvider implements LLMProvider {
     });
   }
 
-  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<string> {
+  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string> {
     const response = await this.client.messages.create(
       {
         model: this.config.model,
-        max_tokens: 4096,
+        max_tokens: options?.maxTokens ?? 4096,
         system: systemPrompt,
         messages: [
           { role: 'user', content: userPrompt },
@@ -118,7 +126,7 @@ export class LLMClient {
     this.provider = createProvider(config);
   }
 
-  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<string> {
+  async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string> {
     const maxAttempts = 3;
     const baseDelayMs = 1000;
 
@@ -130,7 +138,7 @@ export class LLMClient {
       }
 
       try {
-        return await this.provider.complete(systemPrompt, userPrompt, signal);
+        return await this.provider.complete(systemPrompt, userPrompt, signal, options);
       } catch (err: unknown) {
         lastError = err;
 

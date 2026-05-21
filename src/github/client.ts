@@ -222,4 +222,20 @@ export class GitHubClient {
     const { data } = await this.octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
     return data.base.sha;
   }
+
+  async getDefaultBranch(owner: string, repo: string): Promise<string> {
+    const { data } = await this.octokit.repos.get({ owner, repo });
+    return data.default_branch;
+  }
+
+  async createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels?: string[],
+  ): Promise<{ number: number; url: string }> {
+    const { data } = await this.octokit.issues.create({ owner, repo, title, body, labels });
+    return { number: data.number, url: data.html_url };
+  }
 }
