@@ -22,6 +22,7 @@ import { chunkFiles } from './chunker.js';
 import { buildScanPrompt } from './prompts.js';
 import { dedupScanFindings } from './dedup-scan.js';
 import { redactSecrets } from './redact.js';
+import { loadBaseline, saveBaseline, filterNewFindings, createBaseline } from './baseline.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
@@ -162,7 +163,12 @@ function buildCoverageFromChunks(chunks: ScanChunk[], chunkResults: ChunkResult[
 
 export async function scanCodebase(
   target: string,
-  options: ScanOptions & { onProgress?: ScanProgressCallback },
+  options: ScanOptions & {
+    onProgress?: ScanProgressCallback;
+    baseline?: string;
+    updateBaseline?: boolean;
+    baselinePath?: string;
+  },
   llm: LLMClient,
   config: { token?: string; branch?: string },
 ): Promise<ScanResult> {
@@ -216,9 +222,28 @@ export async function scanCodebase(
     );
 
     // f. Dedup findings
-    const findings = dedupScanFindings(chunkResults);
+    const allFindings = dedupScanFindings(chunkResults);
 
-    // g. Build stats and coverage
+    // g. Baseline filtering
+    const resolvedBaselinePath = options.baselinePath ?? `${isGitHub ? '.' : target}/.agentreview-baseline.json`;
+    let findings = allFindings;
+    let suppressedCount: number | undefined;
+
+    if (options.baseline || options.updateBaseline) {
+      // Creating or updating baseline — save all findings
+      const baselineData = createBaseline(allFindings, target);
+      await saveBaseline(resolvedBaselinePath, baselineData);
+    } else {
+      // Check for existing baseline and filter
+      const existingBaseline = await loadBaseline(resolvedBaselinePath);
+      if (existingBaseline) {
+        const filtered = filterNewFindings(allFindings, existingBaseline);
+        findings = filtered.new;
+        suppressedCount = filtered.suppressed.length;
+      }
+    }
+
+    // h. Build stats and coverage
     const stats = buildStats(chunkResults, findings);
     const coverage = buildCoverageFromChunks(chunks, chunkResults);
 
@@ -233,6 +258,7 @@ export async function scanCodebase(
       findings,
       stats,
       coverage,
+      suppressedCount,
     };
   } finally {
     // h. Always cleanup

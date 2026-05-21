@@ -111,7 +111,8 @@ class GeminiProvider implements LLMProvider {
   }
 
   async complete(systemPrompt: string, userPrompt: string, signal?: AbortSignal, options?: LLMCompleteOptions): Promise<string> {
-    const response = await this.client.models.generateContent({
+    // Wrap in abort signal race — @google/genai doesn't natively support AbortSignal
+    const genPromise = this.client.models.generateContent({
       model: this.config.model,
       contents: userPrompt,
       config: {
@@ -120,6 +121,20 @@ class GeminiProvider implements LLMProvider {
         temperature: 0.1,
       },
     });
+
+    let response;
+    if (signal) {
+      response = await Promise.race([
+        genPromise,
+        new Promise<never>((_, reject) => {
+          if (signal.aborted) reject(new LLMError('LLM request was cancelled'));
+          signal.addEventListener('abort', () => reject(new LLMError('LLM request was cancelled')), { once: true });
+        }),
+      ]);
+    } else {
+      response = await genPromise;
+    }
+
     const text = response.text;
     if (!text) {
       throw new LLMError('LLM returned empty response');

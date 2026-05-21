@@ -1,5 +1,26 @@
 import type { ConsolidatedReport, AgentFinding, FindingSeverity } from '../../types/index.js';
 
+function deduplicateRules(findings: AgentFinding[]): SarifRule[] {
+  const seen = new Map<string, SarifRule>();
+  for (const f of findings) {
+    if (!seen.has(f.id)) {
+      seen.set(f.id, {
+        id: f.id,
+        shortDescription: { text: f.summary },
+        fullDescription: { text: f.detail },
+        help: { text: f.suggestion, markdown: f.suggestion },
+        defaultConfiguration: { level: mapSeverity(f.severity) },
+        properties: {
+          tags: f.lenses,
+          category: f.category,
+          severity: f.severity,
+        },
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
 // ─── SARIF 2.1.0 Type Subset ─────────────────────────────────────────────────
 
 interface SarifMessage {
@@ -100,18 +121,7 @@ export function renderSarif(report: ConsolidatedReport): string {
           name: 'AgentReview',
           version: '1.0.0',
           informationUri: 'https://github.com/vidyasagarr7/agentreview',
-          rules: report.findings.map((f) => ({
-            id: f.id,
-            shortDescription: { text: f.summary },
-            fullDescription: { text: f.detail },
-            help: { text: f.suggestion, markdown: f.suggestion },
-            defaultConfiguration: { level: mapSeverity(f.severity) },
-            properties: {
-              tags: f.lenses,
-              category: f.category,
-              severity: f.severity,
-            },
-          })),
+          rules: deduplicateRules(report.findings),
         },
       },
       results: report.findings.map((f) => {

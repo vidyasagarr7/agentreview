@@ -61,6 +61,10 @@ inputs:
   pr-number:
     description: 'Override PR number (for workflow_dispatch or issue_comment triggers)'
     required: false
+  inline:
+    description: 'Post findings as inline review comments on specific PR lines'
+    required: false
+    default: 'false'
   comment-mode:
     description: 'Comment mode: full, summary, or collapsed'
     required: false

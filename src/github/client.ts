@@ -228,6 +228,25 @@ export class GitHubClient {
     return data.default_branch;
   }
 
+  async createInlineReview(
+    owner: string,
+    repo: string,
+    number: number,
+    body: string,
+    comments: Array<{ path: string; line: number; body: string }>,
+    event: 'COMMENT' | 'REQUEST_CHANGES' = 'COMMENT',
+  ): Promise<{ reviewId: number }> {
+    const { data } = await this.octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number: number,
+      event,
+      body,
+      comments: comments.map((c) => ({ ...c, side: 'RIGHT' as const })),
+    });
+    return { reviewId: data.id };
+  }
+
   async createIssue(
     owner: string,
     repo: string,

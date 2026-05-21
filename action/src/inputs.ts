@@ -15,6 +15,7 @@ export interface ActionInputs {
   customLensesDir?: string;
   githubToken: string;
   prNumber?: number;
+  inline: boolean;
   commentMode: 'full' | 'summary' | 'collapsed';
 }
 
@@ -135,6 +136,9 @@ export function parseInputs(): ActionInputs {
   const prNumberParsed = prNumberRaw ? parseInt(prNumberRaw, 10) : undefined;
   const prNumber = prNumberParsed !== undefined && Number.isNaN(prNumberParsed) ? undefined : prNumberParsed;
 
+  // --- inline ---
+  const inline = core.getBooleanInput('inline');
+
   // --- comment-mode ---
   const commentModeRaw = core.getInput('comment-mode') || 'full';
   const validCommentModes = ['full', 'summary', 'collapsed'] as const;
@@ -157,6 +161,7 @@ export function parseInputs(): ActionInputs {
     customLensesDir,
     githubToken,
     prNumber,
+    inline,
     commentMode,
   };
 }

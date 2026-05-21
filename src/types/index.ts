@@ -258,17 +258,3 @@ export interface LLMConfig {
   contextTokens: number;
 }
 
-export interface CLIOptions {
-  lens: string;
-  format: ReportFormat;
-  output?: string;
-  post: boolean;
-  failOn?: FindingSeverity;
-  timeout: number;
-  model?: string;
-  noDedup: boolean;
-  validate: boolean;
-  minConfidence: number;
-  verbose: boolean;
-  yes: boolean;
-}

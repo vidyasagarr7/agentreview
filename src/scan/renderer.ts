@@ -52,12 +52,15 @@ function renderMarkdown(result: ScanResult): string {
 
   if (findings.length === 0) {
     const domainCount = coverage.length;
+    const suppressedNote = result.suppressedCount
+      ? `\n\n> ℹ️ ${result.suppressedCount} pre-existing finding(s) suppressed by baseline.`
+      : '';
     return [
       `# 🔒 Security Scan: ${result.target}`,
       '',
       `**Scanned:** ${result.scannedAt} | **Branch:** ${result.branch} | **Files:** ${result.filesScanned}/${result.filesDiscovered}`,
       '',
-      `✅ No security issues found — scanned ${result.filesScanned} files across ${domainCount} domains.`,
+      `✅ No security issues found — scanned ${result.filesScanned} files across ${domainCount} domains.${suppressedNote}`,
     ].join('\n');
   }
 
@@ -66,8 +69,11 @@ function renderMarkdown(result: ScanResult): string {
   // Header
   lines.push(`# 🔒 Security Scan: ${result.target}`);
   lines.push('');
+  const suppressedHeader = result.suppressedCount
+    ? ` | **Suppressed by baseline:** ${result.suppressedCount}`
+    : '';
   lines.push(
-    `**Scanned:** ${result.scannedAt} | **Branch:** ${result.branch} | **Files:** ${result.filesScanned}/${result.filesDiscovered}`,
+    `**Scanned:** ${result.scannedAt} | **Branch:** ${result.branch} | **Files:** ${result.filesScanned}/${result.filesDiscovered}${suppressedHeader}`,
   );
 
   // Risk Posture

@@ -76,4 +76,33 @@ describe('buildReviewContext', () => {
     expect(ctx.fileList).toContain('foo.ts');
     expect(ctx.fileList).toContain('added');
   });
+
+  it('filters out files matching ignore patterns', () => {
+    const diff = 'diff --git a/src/app.ts b/src/app.ts\n+ real code\n' +
+      'diff --git a/src/app.test.ts b/src/app.test.ts\n+ test code\n' +
+      'diff --git a/migrations/001.sql b/migrations/001.sql\n+ CREATE TABLE\n';
+    const files = [
+      { filename: 'src/app.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 },
+      { filename: 'src/app.test.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 },
+      { filename: 'migrations/001.sql', status: 'added' as const, additions: 1, deletions: 0, changes: 1 },
+    ];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT, {
+      ignore: ['**/*.test.ts', 'migrations/**'],
+    });
+
+    expect(ctx.fileList).toContain('src/app.ts');
+    expect(ctx.fileList).not.toContain('app.test.ts');
+    expect(ctx.fileList).not.toContain('migrations');
+    expect(ctx.diff).not.toContain('app.test.ts');
+    expect(ctx.diff).not.toContain('migrations');
+  });
+
+  it('returns full context when ignore is empty', () => {
+    const diff = 'diff --git a/foo.ts b/foo.ts\n+ test\n';
+    const files = [{ filename: 'foo.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 }];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT, { ignore: [] });
+    expect(ctx.fileList).toContain('foo.ts');
+  });
 });

@@ -42,6 +42,9 @@ export function createScanCommand(): Command {
     .option('--budget <tokens>', 'Token budget for scan', (v) => parseInt(v, 10), 100000)
     .option('--branch <ref>', 'Branch/ref to scan (for GitHub targets)')
     .option('--timeout <seconds>', 'Per-chunk timeout in seconds', (v) => parseInt(v, 10))
+    .option('--baseline', 'Create baseline from scan results (suppresses all current findings in future scans)', false)
+    .option('--update-baseline', 'Update existing baseline with current scan results', false)
+    .option('--baseline-path <path>', 'Custom baseline file path (default: .agentreview-baseline.json in target dir)')
     .option('-v, --verbose', 'Verbose output', false)
     .option('-y, --yes', 'Skip data disclosure prompt', false)
     .action(async (target: string, opts) => {
@@ -69,6 +72,9 @@ async function runScan(target: string, opts: {
   budget: number;
   branch?: string;
   timeout?: number;
+  baseline: boolean;
+  updateBaseline: boolean;
+  baselinePath?: string;
   verbose: boolean;
   yes: boolean;
 }): Promise<void> {
@@ -131,7 +137,11 @@ async function runScan(target: string, opts: {
   // ── Run scan ──────────────────────────────────────────────────────────────
   const llm = new LLMClient(llmConfig);
 
-  const scanOptions: ScanOptions = {
+  const scanOptions: ScanOptions & {
+    baseline?: string;
+    updateBaseline?: boolean;
+    baselinePath?: string;
+  } = {
     focus,
     maxConcurrency: 3,
     budgetTokens: opts.budget,
@@ -142,6 +152,10 @@ async function runScan(target: string, opts: {
     verbose: opts.verbose,
     redact: opts.redact,
   };
+
+  if (opts.baseline) scanOptions.baseline = 'create';
+  if (opts.updateBaseline) scanOptions.updateBaseline = true;
+  if (opts.baselinePath) scanOptions.baselinePath = opts.baselinePath;
 
   const chunkSpinners = new Map<string, ReturnType<typeof ora>>();
 
@@ -163,8 +177,13 @@ async function runScan(target: string, opts: {
     }
   };
 
+  // Pass GitHub token for private repo cloning
+  let githubTokenForClone: string | undefined;
+  try { githubTokenForClone = config.getGitHubToken(); } catch { /* optional for scan */ }
+
   const result = await scanCodebase(target, scanOptions, llm, {
     branch: opts.branch,
+    token: githubTokenForClone,
   });
 
   scanSpinner.succeed(`Scan complete: ${result.filesScanned} files scanned`);
@@ -210,9 +229,22 @@ async function runScan(target: string, opts: {
   if (stats.bySeverity.LOW > 0) parts.push(`${stats.bySeverity.LOW} LOW`);
   if (stats.bySeverity.INFO > 0) parts.push(`${stats.bySeverity.INFO} INFO`);
 
-  const summaryLine = parts.length > 0
-    ? `Found ${stats.total} finding(s): ${parts.join(', ')}`
-    : '✅ No findings — looks clean!';
+  const suppressedNote = result.suppressedCount
+    ? ` (${result.suppressedCount} suppressed by baseline)`
+    : '';
+
+  let summaryLine: string;
+  if (opts.baseline) {
+    summaryLine = `Baseline created with ${result.findings.length} finding(s)`;
+  } else if (opts.updateBaseline) {
+    summaryLine = `Baseline updated with ${result.findings.length} finding(s)`;
+  } else if (parts.length > 0) {
+    summaryLine = `Found ${stats.total} new finding(s): ${parts.join(', ')}${suppressedNote}`;
+  } else if (result.suppressedCount) {
+    summaryLine = `✅ No new findings${suppressedNote}`;
+  } else {
+    summaryLine = '✅ No findings — looks clean!';
+  }
 
   console.error(`\n📋 ${summaryLine}`);
 

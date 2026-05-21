@@ -1,6 +1,8 @@
 import * as github from '@actions/github';
 import * as core from '@actions/core';
 import type { PRContext } from './context.js';
+import type { AgentFinding } from '../../src/types/index.js';
+import { mapFindingsToInlineComments } from '../../src/report/inline.js';
 
 const MARKER = '<!-- agentreview -->';
 const MAX_COMMENT_LENGTH = 65000;
@@ -18,9 +20,43 @@ export async function postResults(
   prContext: PRContext,
   commentMode: 'full' | 'summary' | 'collapsed',
   stats: { total: number; bySeverity: Record<string, number> },
+  options?: { inline?: boolean; findings?: AgentFinding[]; changedFiles?: string[]; failOn?: string },
 ): Promise<PostResult> {
   const octokit = github.getOctokit(prContext.token);
   const { owner, repo, prNumber } = prContext;
+
+  // Inline review mode: post findings as inline comments on specific lines
+  if (options?.inline && options.findings && options.changedFiles) {
+    const { inline: inlineComments, fallback } = mapFindingsToInlineComments(
+      options.findings,
+      options.changedFiles,
+    );
+
+    const reviewBody = fallback.length > 0
+      ? `${report}\n\n> ℹ️ ${fallback.length} finding(s) could not be mapped to specific diff lines and are included in this summary.`
+      : report;
+
+    const event = options.failOn ? 'REQUEST_CHANGES' : 'COMMENT';
+
+    const { data } = await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      event,
+      body: reviewBody,
+      comments: inlineComments.map((c) => ({
+        path: c.path,
+        line: c.line,
+        body: c.body,
+        side: 'RIGHT' as const,
+      })),
+    });
+
+    // Still write full report to step summary
+    await core.summary.addRaw(report).write();
+
+    return { commentId: data.id, created: true };
+  }
 
   // Build comment body based on mode
   let commentBody = buildCommentBody(report, commentMode, stats);

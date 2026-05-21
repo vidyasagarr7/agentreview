@@ -13,6 +13,8 @@ import { consolidate } from '../report/consolidator.js';
 import { validateAgentResults } from '../validation/validator.js';
 import { render } from '../report/renderer.js';
 import { ConfigManager, ConfigError } from './config.js';
+import { loadRepoConfig } from '../config/repo-config.js';
+import type { RepoConfig } from '../config/repo-config.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
@@ -20,6 +22,7 @@ import { createScanCommand } from './commands/scan.js';
 import { runEnsemble } from '../ensemble/index.js';
 import { renderEnsembleReport } from '../ensemble/renderer.js';
 import { buildCodebaseContext } from '../codebase/index.js';
+import { mapFindingsToInlineComments } from '../report/inline.js';
 import type { FindingSeverity, ReportFormat } from '../types/index.js';
 import { SEVERITY_ORDER } from '../types/index.js';
 
@@ -41,6 +44,9 @@ async function reviewPR(prUrl: string, opts: {
   codebaseBudget: number;
   yes: boolean;
   output?: string;
+  inline: boolean;
+  ignore?: string[];
+  repoConfig?: RepoConfig;
 }): Promise<void> {
   const config = new ConfigManager();
 
@@ -156,7 +162,9 @@ async function reviewPR(prUrl: string, opts: {
   }
 
   // ── Build review context ──────────────────────────────────────────────────
-  const context = buildReviewContext(pr, pr.diff, pr.files, llmConfig.contextTokens);
+  const context = buildReviewContext(pr, pr.diff, pr.files, llmConfig.contextTokens, {
+    ignore: opts.ignore,
+  });
   if (codebaseCtx) {
     context.codebase = codebaseCtx;
   }
@@ -274,16 +282,41 @@ async function reviewPR(prUrl: string, opts: {
 
   // ── Post to GitHub ────────────────────────────────────────────────────────
   if (opts.post) {
-    const postSpinner = ora('Posting review comment to GitHub…').start();
-    try {
-      // Always post as markdown when posting to GitHub
-      const markdownBody = opts.format === 'markdown' ? rendered : render(report, 'markdown');
-      await githubClient.postOrUpdateComment(owner, repo, number, markdownBody);
-      postSpinner.succeed('Review posted to GitHub');
-    } catch (err) {
-      postSpinner.fail('Failed to post comment');
-      console.error(`⚠️  Could not post to GitHub: ${(err as Error).message}`);
-      // Don't exit — local output was already written
+    if (opts.inline) {
+      const postSpinner = ora('Posting inline review to GitHub…').start();
+      try {
+        const markdownBody = opts.format === 'markdown' ? rendered : render(report, 'markdown');
+        const changedFiles = pr.files.map((f) => f.filename);
+        const { inline: inlineComments, fallback } = mapFindingsToInlineComments(report.findings, changedFiles);
+
+        // Post inline review with comments on specific lines
+        const reviewBody = fallback.length > 0
+          ? `${markdownBody}\n\n> ℹ️ ${fallback.length} finding(s) could not be mapped to specific diff lines and are included in this summary.`
+          : markdownBody;
+
+        await githubClient.createInlineReview(
+          owner, repo, number,
+          reviewBody,
+          inlineComments.map((c) => ({ path: c.path, line: c.line, body: c.body })),
+          failOn ? 'REQUEST_CHANGES' : 'COMMENT',
+        );
+        postSpinner.succeed(`Inline review posted to GitHub (${inlineComments.length} inline, ${fallback.length} in summary)`);
+      } catch (err) {
+        postSpinner.fail('Failed to post inline review');
+        console.error(`⚠️  Could not post to GitHub: ${(err as Error).message}`);
+      }
+    } else {
+      const postSpinner = ora('Posting review comment to GitHub…').start();
+      try {
+        // Always post as markdown when posting to GitHub
+        const markdownBody = opts.format === 'markdown' ? rendered : render(report, 'markdown');
+        await githubClient.postOrUpdateComment(owner, repo, number, markdownBody);
+        postSpinner.succeed('Review posted to GitHub');
+      } catch (err) {
+        postSpinner.fail('Failed to post comment');
+        console.error(`⚠️  Could not post to GitHub: ${(err as Error).message}`);
+        // Don't exit — local output was already written
+      }
     }
   }
 
@@ -327,7 +360,7 @@ const program = new Command();
 program
   .name('agentreview')
   .description('Multi-perspective automated PR review using parallel AI agents')
-  .version('0.1.0')
+  .version('1.0.0')
   .argument('<pr-url>', 'GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)')
   .addOption(
     new Option('--format <format>', 'Output format')
@@ -358,6 +391,11 @@ program
   .option(
     '--post',
     'Post review as a GitHub PR comment',
+    false
+  )
+  .option(
+    '--inline',
+    'Post findings as inline review comments on specific PR lines (requires --post)',
     false
   )
   .option(
@@ -413,28 +451,41 @@ program
   .action(async (prUrl: string, opts) => {
     try {
       const config = new ConfigManager();
+
+      // Load per-repo .agentreview.yml (if present)
+      const repoConfig = await loadRepoConfig(process.cwd());
+      if (repoConfig && opts.verbose) {
+        console.error('📄 Loaded .agentreview.yml config');
+      }
+
+      // Merge priority: CLI flags > .agentreview.yml > env vars > defaults
       // Resolve --lens / --lenses (--lens is alias for --lenses)
-      const lensesValue: string = opts.lens ?? opts.lenses ?? config.getDefaultLenses();
-      // Resolve --fail-on: CLI flag overrides env var
-      const failOnValue: string | undefined = opts.failOn ?? config.getFailOnSeverity();
+      const lensesValue: string = opts.lens ?? opts.lenses ?? (repoConfig?.lenses ? repoConfig.lenses.join(',') : null) ?? config.getDefaultLenses();
+      // Resolve --fail-on: CLI flag overrides repo config overrides env var
+      const failOnValue: string | undefined = opts.failOn ?? repoConfig?.failOn ?? config.getFailOnSeverity();
       // Resolve timeout: CLI flag > env var (via ConfigManager) > hardcoded default
       const timeoutValue: number = opts.timeout ?? config.getTimeout();
+      // Resolve model: CLI flag > repo config > env var > default
+      const modelValue: string | undefined = opts.model ?? repoConfig?.model;
       await reviewPR(prUrl, {
         format: opts.format as ReportFormat,
         lenses: lensesValue,
         failOn: failOnValue,
         timeout: timeoutValue,
-        model: opts.model,
+        model: modelValue,
         post: opts.post,
         verbose: opts.verbose,
         noDedup: !opts.dedup, // commander inverts --no-dedup → opts.dedup
-        validate: opts.validate,
-        minConfidence: opts.minConfidence ?? 40,
+        validate: opts.validate !== undefined ? opts.validate : (repoConfig?.validate ?? true),
+        minConfidence: opts.minConfidence ?? repoConfig?.minConfidence ?? 40,
         ensemble: opts.ensemble,
-        codebaseContext: opts.codebaseContext,
-        codebaseBudget: opts.codebaseBudget ?? 8000,
+        codebaseContext: opts.codebaseContext !== undefined ? opts.codebaseContext : (repoConfig?.codebaseContext ?? true),
+        codebaseBudget: opts.codebaseBudget ?? repoConfig?.codebaseBudget ?? 8000,
         yes: opts.yes,
         output: opts.output,
+        inline: opts.inline,
+        ignore: repoConfig?.ignore,
+        repoConfig: repoConfig ?? undefined,
       });
     } catch (err) {
       console.error(`\n❌ Unexpected error: ${(err as Error).message}`);

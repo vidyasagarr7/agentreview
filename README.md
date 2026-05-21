@@ -105,6 +105,7 @@ jobs:
 | `min-confidence` | `40` | Minimum confidence score (0–100) to keep a finding |
 | `codebase-context` | `true` | Enable repo tree + import graph context |
 | `codebase-budget` | `8000` | Token budget for codebase context |
+| `inline` | `false` | Post findings as inline review comments on specific PR lines |
 | `comment-mode` | `full` | PR comment mode: `full`, `summary`, or `collapsed` |
 | `custom-lenses-dir` | — | Path to custom lens JSON files (requires `actions/checkout`) |
 | `github-token` | `${{ github.token }}` | GitHub token for API access |
@@ -173,6 +174,7 @@ agentreview https://github.com/owner/repo/pull/123 --fail-on HIGH --yes
 | `--timeout <seconds>` | `60` | Per-agent timeout |
 | `--model <model>` | `gpt-4o` | LLM model to use |
 | `--post` | `false` | Post/update review comment on the PR |
+| `--inline` | `false` | Post findings as inline review comments (requires `--post`) |
 | `--output <file>` | — | Write report to file |
 | `--no-dedup` | `false` | Disable cross-lens deduplication |
 | `--validate` / `--no-validate` | `true` | Enable/disable confidence scoring |
@@ -236,8 +238,29 @@ agentreview scan https://github.com/owner/repo --branch develop
 | `--budget <tokens>` | `100000` | Token budget for scan |
 | `--branch <ref>` | — | Branch/ref to scan (GitHub targets) |
 | `--timeout <seconds>` | — | Per-chunk timeout |
+| `--baseline` | `false` | Create baseline from scan results |
+| `--update-baseline` | `false` | Update existing baseline with current results |
+| `--baseline-path <path>` | `.agentreview-baseline.json` | Custom baseline file path |
 | `-v, --verbose` | `false` | Verbose output |
 | `-y, --yes` | `false` | Skip data disclosure prompt |
+
+#### Incremental Scanning with Baseline
+
+When adopting AgentReview on a large codebase, the first scan may surface hundreds of pre-existing findings. The baseline feature lets you acknowledge existing issues and only surface **new** findings going forward.
+
+```bash
+# Step 1: Create a baseline (suppresses all current findings in future scans)
+agentreview scan ./my-project --baseline -y
+
+# Step 2: Regular scans now only report NEW findings
+agentreview scan ./my-project -y
+# “Found 3 new finding(s): 1 HIGH, 2 MEDIUM (47 suppressed by baseline)”
+
+# Step 3: After fixing issues, update the baseline
+agentreview scan ./my-project --update-baseline -y
+```
+
+The baseline is stored in `.agentreview-baseline.json` in the target directory (or specify a custom path with `--baseline-path`). Findings are matched by file, category, and summary — not line number — so they survive minor code shifts.
 
 ### Auto-Fix Findings
 

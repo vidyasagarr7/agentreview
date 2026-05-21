@@ -92,6 +92,7 @@ export interface ScanResult {
   findings: AgentFinding[];
   stats: ScanStats;
   coverage: CoverageEntry[];
+  suppressedCount?: number;
 }
 
 // ─── Callbacks & Interfaces ───────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { minimatch } from 'minimatch';
 import type { PRData, ChangedFile, ReviewContext } from '../types/index.js';
 
 // Security-relevant filename patterns — prioritize these when truncating
@@ -48,12 +49,32 @@ function buildFileSummary(file: ChangedFile): string {
   return `[diff omitted — too large] ${file.filename} (${file.status}, +${file.additions}/-${file.deletions} lines)`;
 }
 
+export interface BuildReviewContextOptions {
+  ignore?: string[];
+}
+
 export function buildReviewContext(
   pr: PRData,
   diff: string,
   files: ChangedFile[],
-  modelContextTokens: number
+  modelContextTokens: number,
+  options?: BuildReviewContextOptions
 ): ReviewContext {
+  // Filter out ignored files before processing
+  if (options?.ignore && options.ignore.length > 0) {
+    const patterns = options.ignore;
+    files = files.filter((f) => !patterns.some((p) => minimatch(f.filename, p)));
+    // Rebuild diff to exclude ignored files
+    const includedFilenames = new Set(files.map((f) => f.filename));
+    const diffSections = diff.split(/(?=^diff --git )/m);
+    diff = diffSections
+      .filter((section) => {
+        const match = section.match(/^diff --git a\/[^\s]+ b\/(.+)/);
+        if (!match) return true; // keep preamble
+        return includedFilenames.has(match[1]);
+      })
+      .join('');
+  }
   // Reserve budget for system prompt + PR metadata + output
   const RESERVED_TOKENS = 4000;
   const diffBudget = modelContextTokens - RESERVED_TOKENS;

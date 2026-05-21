@@ -17,6 +17,7 @@ import { dispatchAgents } from '../../src/agents/dispatcher.js';
 import { validateAgentResults } from '../../src/validation/validator.js';
 import { consolidate } from '../../src/report/consolidator.js';
 import { render } from '../../src/report/renderer.js';
+import { loadRepoConfig } from '../../src/config/repo-config.js';
 
 export interface ActionReviewResult {
   report: string;
@@ -62,12 +63,36 @@ export async function runReview(
   const lenses = registry.resolveLenses(inputs.lenses);
   core.info(`Running ${lenses.length} lens(es): ${lenses.map((l) => l.id).join(', ')}`);
 
+  // 4. Load per-repo config (if workspace is checked out)
+  const repoConfig = await loadRepoConfig(process.cwd());
+  if (repoConfig) {
+    core.info('Loaded .agentreview.yml from repository root');
+    // Merge repo config with Action inputs (Action inputs take priority)
+    if (!inputs.failOn && repoConfig.failOn) {
+      inputs.failOn = repoConfig.failOn as FindingSeverity;
+    }
+    if (repoConfig.validate !== undefined && inputs.validate === true) {
+      // Only apply repo config if Action input wasn't explicitly set
+      // (Action defaults are true, so we can't distinguish — repo config is advisory)
+    }
+    if (repoConfig.minConfidence !== undefined && inputs.minConfidence === 40) {
+      inputs.minConfidence = repoConfig.minConfidence;
+    }
+    if (repoConfig.codebaseBudget !== undefined && inputs.codebaseBudget === 8000) {
+      inputs.codebaseBudget = repoConfig.codebaseBudget;
+    }
+  }
+
+  // Determine ignore patterns from repo config
+  const ignorePatterns = repoConfig?.ignore;
+
   // 4. Build review context
   const reviewContext = buildReviewContext(
     pr,
     pr.diff,
     pr.files,
     inputs.llmConfig.contextTokens,
+    { ignore: ignorePatterns },
   );
 
   // 5. Optionally build codebase context
