@@ -15,7 +15,8 @@
     "test": "tsc --noEmit && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "build:action": "tsup --config tsup.config.action.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
