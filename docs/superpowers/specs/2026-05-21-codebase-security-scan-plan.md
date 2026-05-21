@@ -3,6 +3,7 @@
 **Date:** 2026-05-21
 **Spec:** `2026-05-21-codebase-security-scan-design.md`
 **Branch:** `feat/codebase-security-scan`
+**Revision:** v2 — incorporates 10 plan challenge findings
 
 ---
 
@@ -16,7 +17,7 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 **Files:** `src/scan/types.ts`
 **Intent:** Define all scan-specific TypeScript types and interfaces.
 **Content:**
-- `SecurityDomain` enum: `auth | secrets | injection | config | deps | crypto | general`
+- `SecurityDomain` enum: `auth | secrets | injection | config | deps | crypto | data-flow | general` (Finding 10: add `data-flow`)
 - `FileEntry`: `{ path, size, priority: number }`
 - `ChunkFile`: `{ path, content, priority, estimatedTokens }`
 - `ScanChunk`: `{ id, domain, files, estimatedTokens, focusPrompt }`
@@ -59,8 +60,11 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 - Supports `--branch <ref>` for specific branch/tag
 - `cleanup()` removes temp directory
 - Handles clone failure gracefully (bad URL, private repo without auth)
+- **Authenticated clone:** when `GITHUB_TOKEN` available, rewrites URL to `https://x-access-token:TOKEN@github.com/owner/repo.git` (Finding 8)
+- Test: authenticated URL construction produces correct format
 **Implementation:**
 - `child_process.execFile('git', ['clone', '--depth', '1', ...])` with timeout
+- Token injection: if token available, use authenticated URL for private repo support
 - Return a `LocalSourceReader` pointed at the cloned directory
 - Temp dir via `fs.mkdtemp()`
 **Verification:** All tests pass (mock `execFile` for unit tests)
@@ -114,8 +118,9 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 - Secrets prompt mentions known key patterns (AKIA, ghp_)
 - All prompts instruct JSON array output format (same as existing lens format)
 - `buildScanPrompt(chunk: ScanChunk)` returns `{ system, user }` with file contents embedded
+- **parseFindings compatibility test** (Finding 7): mock a realistic LLM response to a scan prompt, pass through `parseFindings()`, verify it parses correctly
 **Implementation:**
-- One prompt constant per domain (6 domains + general fallback)
+- One prompt constant per domain (7 domains: auth, secrets, injection, config, deps, crypto, data-flow + general fallback)
 - `buildScanPrompt(chunk: ScanChunk): { system: string; user: string }` — assembles system prompt + file contents as user prompt
 - User prompt includes: file list, file contents with line numbers, repo/branch metadata
 **Verification:** All tests pass
@@ -153,7 +158,7 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 **Implementation:**
 - `dedupScanFindings(chunkResults: ChunkResult[]): AgentFinding[]`
 - Location-proximity: parse `file:line` from finding.location, group by file, merge within ±5 lines + same category
-- Cross-domain: same file + similar summary → merge using existing `tokenOverlap` as similarity check
+- Cross-domain: same file + similar summary → merge using inline token overlap similarity (Finding 5: self-contained, do NOT import from `dedup.ts` — implement `tokenOverlap` locally in this module to avoid export dependency)
 **Verification:** All tests pass
 
 ---
@@ -171,8 +176,8 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 - Cleanup called on clone-based readers (even on error)
 **Implementation:**
 - `scanCodebase(target: string, options: ScanOptions, llm: LLMClient): Promise<ScanResult>`
-- Uses p-limit or manual semaphore for concurrency control
-- Dispatches each chunk by calling `llm.complete()` with `buildScanPrompt()` output
+- Uses `p-limit` for concurrency control (Finding 2: committed to p-limit, NOT manual semaphore)
+- Dispatches each chunk by calling `llm.complete()` with `buildScanPrompt()` output and `maxTokens: 8192` (Finding 1: scan chunks produce more findings than PR lenses)
 - Parses findings via existing `parseFindings()`
 - Applies `dedupScanFindings()`
 - Optionally runs validation (reuse existing `validateAgentResults`)
@@ -181,19 +186,20 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 
 ---
 
-### Task 10: Scan report renderer (`src/scan/renderer.ts`)
+### Task 10: Scan report renderer (`src/scan/renderer.ts`) — STANDALONE (Finding 6)
 **Files:** `src/scan/renderer.ts`, `src/scan/renderer.test.ts`
-**Intent:** Render scan results as markdown or JSON with scan-specific sections.
+**Intent:** Render scan results as markdown or JSON. This is a **standalone renderer**, NOT extending the existing `src/report/renderer.ts` (which operates on `ConsolidatedReport` for PR reviews). Scan reports have different structure (coverage tables, hotspots, domain breakdown).
 **Tests first (RED):**
 - Markdown output includes: title, risk posture table, coverage table, hotspots, findings
 - JSON output includes all ScanResult fields
 - Empty findings → "✅ No security issues found" message
 - Hotspots sorted by severity then count
+- **Regression guard:** existing PR markdown renderer (`src/report/renderers/markdown.ts`) still produces correct output (run existing tests)
 **Implementation:**
 - `renderScanReport(result: ScanResult, format: 'markdown' | 'json'): string`
 - Markdown: header → risk posture table → coverage table → top 10 hotspots → findings (standard format)
 - JSON: serialize full ScanResult
-**Verification:** All tests pass
+**Verification:** All tests pass + existing report tests pass
 
 ---
 
@@ -211,29 +217,55 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 
 ---
 
-### Task 12: CLI command — `agentreview scan` (`src/cli/commands/scan.ts`)
+### Task 12a: CLI command skeleton — `agentreview scan` (`src/cli/commands/scan.ts`) (Finding 3: split)
 **Files:** `src/cli/commands/scan.ts`
-**Intent:** Wire up the scan subcommand with all options.
+**Intent:** Basic CLI subcommand with argument parsing, config resolution, progress display, stdout/file output.
 **Implementation:**
-- Commander subcommand with all options from spec section 3
+- Commander subcommand with all options from spec section 3 (EXCEPT `--ensemble` — descoped, Finding 4)
 - Resolve target: GitHub URL → clone; local path → LocalSourceReader
 - Config resolution (same pattern as main review command)
 - Progress spinners using `ora` (same pattern as main command)
-- Call `scanCodebase()` → render → output/issue/stdout
-- `--issue` support: create GitHub Issue via `GitHubClient.createIssue()`
+- Call `scanCodebase()` → render → stdout or `--output <file>`
 - `--fail-on` support: exit code 2 logic (same as main command)
-- `--ensemble` support: run scan with multiple models
 **Verification:** `npx tsc --noEmit` passes, `node dist/cli/index.js scan --help` shows correct options
+
+---
+
+### Task 12b: `--issue` support for scan CLI (Finding 3: split)
+**Files:** `src/cli/commands/scan.ts` (extend)
+**Depends on:** Task 13 (`createIssue()` on GitHubClient)
+**Intent:** Add `--issue` flag to post scan results as a GitHub Issue.
+**Implementation:**
+- Parse target URL for owner/repo (or require explicit `--repo` for local scans)
+- Create issue with severity-based labels
+- Truncate body if >65K chars (GitHub limit)
+**Verification:** `npx tsc --noEmit` passes
 
 ---
 
 ### Task 13: Register scan command + GitHubClient extensions
 **Files:** `src/cli/index.ts`, `src/github/client.ts`
 **Intent:** Wire scan command into main CLI, add `getDefaultBranch()` and `createIssue()` to GitHubClient.
+**Note:** Must complete BEFORE Task 12b (Finding 3: ordering fix)
 **Implementation:**
 - `src/cli/index.ts`: `program.addCommand(createScanCommand())`
 - `src/github/client.ts`: add `getDefaultBranch(owner, repo)` and `createIssue(owner, repo, title, body, labels?)`
 **Verification:** `agentreview scan --help` works, `npx tsc --noEmit` passes
+
+---
+
+### Task 13b: LLMClient `maxTokens` override (`src/llm/client.ts`) (Finding 1: NEW)
+**Files:** `src/llm/client.ts`, `src/llm/client.test.ts`
+**Intent:** Allow callers to pass `maxTokens` to `complete()`. Scan mode needs 8192+ vs default 4096.
+**Implementation:**
+- Add optional `options?: { maxTokens?: number }` parameter to `LLMClient.complete()`
+- Anthropic provider: use `options.maxTokens ?? 4096`
+- OpenAI provider: pass as `max_tokens` if provided
+- Backward compatible: existing callers don't pass options, get default 4096
+**Tests:**
+- Existing tests still pass (no options = default behavior)
+- New test: passing `maxTokens: 8192` uses that value
+**Verification:** All existing + new tests pass
 
 ---
 
@@ -285,14 +317,18 @@ Each task is atomic (2-10 min), has exact file paths, and includes verification 
 
 ---
 
-## Execution Order
+## Execution Order (revised per challenge findings)
 
 Tasks can be parallelized in groups:
-- **Group 1 (foundations):** Tasks 1, 7 (types + redact — no dependencies)
+- **Group 0 (dependencies):** `npm install p-limit` + verify ESM compat with tsup build (Finding 2)
+- **Group 1 (foundations):** Tasks 1, 7, 11, 13b (types + redact + disclosure + LLMClient maxTokens — no pipeline dependencies; Finding 9: moved disclosure earlier)
 - **Group 2 (readers):** Tasks 2, 3 (local reader + clone — depend on types)
 - **Group 3 (pipeline):** Tasks 4, 5, 6 (discovery + chunker + prompts — depend on types + reader)
 - **Group 4 (orchestration):** Tasks 8, 9, 10 (dedup + orchestrator + renderer — depend on pipeline)
-- **Group 5 (CLI):** Tasks 11, 12, 13, 14 (disclosure + CLI + wiring — depend on orchestration)
+- **Group 5 (CLI):** Task 13 first, then Tasks 12a, 12b, 14 (wiring → CLI skeleton → --issue → exports)
 - **Group 6 (testing):** Tasks 15, 16, 17 (fixtures + integration + verification — depend on everything)
+
+## Descoped from v1 (Finding 4)
+- `--ensemble` for scan mode — existing `runEnsemble()` operates on `ReviewContext`/`Lens[]`, incompatible with scan chunks. Will add in a follow-up after the core scan ships.
 
 Total estimated time: 2-3 hours with parallel subagent execution.
