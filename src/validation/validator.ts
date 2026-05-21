@@ -21,10 +21,16 @@ export function applyValidationGate(
 ): AgentFinding[] {
   const minConfidence = options.minConfidence ?? 40;
 
-  return findings.map((finding) => ({
-    ...finding,
-    disposition: dispositionForScore(finding.confidenceScore, minConfidence),
-  }));
+  return findings.map((finding) => {
+    // Deterministic findings skip validation — always confirmed
+    if (finding.deterministic) {
+      return { ...finding, disposition: 'confirmed' as FindingDisposition };
+    }
+    return {
+      ...finding,
+      disposition: dispositionForScore(finding.confidenceScore, minConfidence),
+    };
+  });
 }
 
 export async function validateAgentResults(
@@ -33,14 +39,27 @@ export async function validateAgentResults(
   llm: ValidationLLM,
   options: ValidationOptions = {}
 ): Promise<AgentResult[]> {
-  const findings = results.flatMap((result) => (Array.isArray(result.findings) ? result.findings : []));
-  if (findings.length === 0) return results;
+  const allFindings = results.flatMap((result) => (Array.isArray(result.findings) ? result.findings : []));
+  if (allFindings.length === 0) return results;
 
-  const scored = applyValidationGate(
-    await scoreFindings(findings, context, llm),
-    options
+  // Separate deterministic findings — they skip LLM scoring entirely
+  const llmFindings = allFindings.filter((f) => !f.deterministic);
+  const deterministicFindings = allFindings.filter((f) => f.deterministic);
+
+  // Score only non-deterministic findings via LLM
+  const scoredLlm = llmFindings.length > 0
+    ? applyValidationGate(await scoreFindings(llmFindings, context, llm), options)
+    : [];
+
+  // Deterministic findings are always confirmed
+  const scoredDeterministic = deterministicFindings.map((f) => ({
+    ...f,
+    disposition: 'confirmed' as FindingDisposition,
+  }));
+
+  const byId = new Map(
+    [...scoredLlm, ...scoredDeterministic].map((finding) => [finding.id, finding]),
   );
-  const byId = new Map(scored.map((finding) => [finding.id, finding]));
 
   return results.map((result) => {
     if (!Array.isArray(result.findings)) return result;

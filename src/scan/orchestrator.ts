@@ -25,6 +25,7 @@ import { loadBaseline, saveBaseline, filterNewFindings, createBaseline } from '.
 import { redactSecrets } from './redact.js';
 import { loadRepoConfig } from '../config/repo-config.js';
 import { buildHipaaContext } from '../lenses/builtin/hipaa.js';
+import { runDeterministicScan } from '../hipaa/scanners/index.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
@@ -235,6 +236,39 @@ export async function scanCodebase(
         limit(() => dispatchChunk(chunk, llm, meta, options.onProgress, hipaaContext)),
       ),
     );
+
+    // e2. Run deterministic HIPAA scanners if HIPAA is active
+    let repoConfig;
+    if (configRoot) {
+      try {
+        repoConfig = await loadRepoConfig(configRoot);
+      } catch {
+        // Ignore
+      }
+    }
+
+    if (repoConfig?.hipaa) {
+      // Build file content map from discovered files
+      const fileContentMap = new Map<string, string>();
+      for (const cf of classifiedFiles) {
+        const content = await effectiveReader.readFile(cf.path);
+        if (content !== null) {
+          fileContentMap.set(cf.path, content);
+        }
+      }
+
+      const deterministicFindings = runDeterministicScan(fileContentMap, repoConfig.hipaa);
+
+      if (deterministicFindings.length > 0) {
+        const syntheticChunk: ChunkResult = {
+          chunkId: 'deterministic',
+          domain: 'general' as any,
+          findings: deterministicFindings,
+          durationMs: 0,
+        };
+        chunkResults.push(syntheticChunk);
+      }
+    }
 
     // f. Dedup findings
     const allFindings = dedupScanFindings(chunkResults);

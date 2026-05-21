@@ -49,6 +49,11 @@ function mergeInto(target: AgentFinding, source: AgentFinding): void {
   if (source.suggestion && (!target.suggestion || source.suggestion.length > target.suggestion.length)) {
     target.suggestion = source.suggestion;
   }
+  // Preserve deterministic metadata if either side is deterministic
+  if (source.deterministic || target.deterministic) {
+    target.deterministic = true;
+    target.confidenceScore = 100;
+  }
 }
 
 // ─── Main Dedup Function ──────────────────────────────────────────────────────
@@ -107,8 +112,14 @@ export function dedupScanFindings(chunkResults: ChunkResult[]): AgentFinding[] {
           locB.line != null &&
           Math.abs(locA.line - locB.line) <= LINE_PROXIMITY_THRESHOLD
         ) {
-          mergeInto(a, b);
-          absorbed.add(b);
+          // When merging deterministic + non-deterministic, keep deterministic as anchor
+          if (b.deterministic && !a.deterministic) {
+            mergeInto(b, a);
+            absorbed.add(a);
+          } else {
+            mergeInto(a, b);
+            absorbed.add(b);
+          }
         }
       }
     }
@@ -143,8 +154,14 @@ export function dedupScanFindings(chunkResults: ChunkResult[]): AgentFinding[] {
         const allSame = domainsA.size === domainsB.size && [...domainsA].every((d) => domainsB.has(d));
 
         if (!allSame && tokenOverlap(a.summary, b.summary) >= SUMMARY_SIMILARITY_THRESHOLD) {
-          mergeInto(a, b);
-          absorbed2.add(b);
+          // When merging deterministic + non-deterministic, keep deterministic as anchor
+          if (b.deterministic && !a.deterministic) {
+            mergeInto(b, a);
+            absorbed2.add(a);
+          } else {
+            mergeInto(a, b);
+            absorbed2.add(b);
+          }
         }
       }
     }

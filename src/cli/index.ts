@@ -16,6 +16,7 @@ import { ConfigManager, ConfigError } from './config.js';
 import { loadRepoConfig } from '../config/repo-config.js';
 import type { RepoConfig } from '../config/repo-config.js';
 import { buildHipaaContext } from '../lenses/builtin/hipaa.js';
+import { runDeterministicScan } from '../hipaa/scanners/index.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
@@ -267,6 +268,36 @@ async function reviewPR(prUrl: string, opts: {
       }
     },
   });
+
+  // ── Run deterministic HIPAA scanners ─────────────────────────────────────
+  if (opts.repoConfig?.hipaa && lenses.some((l) => l.id === 'hipaa')) {
+    const detSpinner = ora('Running deterministic HIPAA scanners…').start();
+    try {
+      const fileContentMap = new Map<string, string>();
+      const headRef = pr.headBranch;
+      for (const file of pr.files) {
+        if (file.status === 'removed') continue;
+        const content = await githubClient.getFileContent(owner, repo, file.filename, headRef);
+        if (content !== null) {
+          fileContentMap.set(file.filename, content);
+        }
+      }
+      const deterministicFindings = runDeterministicScan(fileContentMap, opts.repoConfig.hipaa);
+      if (deterministicFindings.length > 0) {
+        // Inject as an additional AgentResult so they flow through consolidation
+        agentResults.push({
+          lensId: 'hipaa',
+          findings: deterministicFindings,
+          durationMs: 0,
+        });
+        detSpinner.succeed(`Deterministic scanners: ${deterministicFindings.length} finding(s)`);
+      } else {
+        detSpinner.succeed('Deterministic scanners: clean');
+      }
+    } catch (err) {
+      detSpinner.warn(`Deterministic scanners failed: ${(err as Error).message}`);
+    }
+  }
 
   // ── Validate findings ─────────────────────────────────────────────────────
   let validatedResults = agentResults;
