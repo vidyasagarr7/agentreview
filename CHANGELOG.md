@@ -32,6 +32,8 @@ All notable changes to this project will be documented in this file.
   - `custom-lenses-dir` support (requires `actions/checkout`)
   - `pull_request_target` security documentation
 
+- **Google Gemini provider support** — Use `gemini-*` models with `GEMINI_API_KEY` (CLI) or `google-api-key` (GitHub Action). Auto-detected from model name. Supports 1M context window.
+
 - **Anthropic provider support** — Auto-detects provider from model name (`claude-*` → Anthropic, `gpt-*`/`o1-*`/`o3-*` → OpenAI). Supports both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
 ## [0.1.0] - Initial Release

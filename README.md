@@ -17,7 +17,7 @@ AI-powered multi-lens code review for pull requests and codebases — security, 
 - 🔒 **Security scanner** — Deep codebase security analysis across 8 domains
 - ⚡ **GitHub Action** — Drop-in CI/CD integration with PR comments and step summaries
 - 🔌 **Custom lenses** — Write your own review perspectives as JSON
-- 📝 **Dual provider support** — Works with both OpenAI and Anthropic models
+- 📝 **Multi-provider support** — Works with OpenAI, Anthropic, and Google Gemini models
 - 🚀 **CI-friendly** — `--fail-on` exit codes for gate-able pipelines
 
 ## Quick Start
@@ -35,6 +35,20 @@ AI-powered multi-lens code review for pull requests and codebases — security, 
 ```bash
 npm install -g agentreview
 agentreview https://github.com/owner/repo/pull/123
+```
+
+### Using Gemini
+
+```yaml
+- uses: vidyasagarr7/agentreview@v1
+  with:
+    google-api-key: ${{ secrets.GEMINI_API_KEY }}
+    model: gemini-2.5-flash
+```
+
+```bash
+export GEMINI_API_KEY=...
+agentreview https://github.com/owner/repo/pull/123 --model gemini-2.5-flash
 ```
 
 ## GitHub Action
@@ -81,8 +95,9 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `anthropic-api-key` | — | Anthropic API key (required if not using `openai-api-key`) |
-| `openai-api-key` | — | OpenAI API key (required if not using `anthropic-api-key`) |
+| `anthropic-api-key` | — | Anthropic API key (required if not using another provider key) |
+| `openai-api-key` | — | OpenAI API key (required if not using another provider key) |
+| `google-api-key` | — | Google AI (Gemini) API key (required if not using another provider key) |
 | `model` | `claude-sonnet-4-20250514` | LLM model to use |
 | `lenses` | `all` | Comma-separated lenses or `all` |
 | `fail-on` | — | Fail if findings ≥ severity (`CRITICAL\|HIGH\|MEDIUM\|LOW\|INFO`) |
@@ -300,6 +315,7 @@ agentreview https://github.com/owner/repo/pull/123 --no-validate
 # Provider keys (at least one required)
 OPENAI_API_KEY=sk-...               # OpenAI API key
 ANTHROPIC_API_KEY=sk-ant-...        # Anthropic API key
+GEMINI_API_KEY=...                   # Google AI (Gemini) API key
 
 # Required
 GITHUB_TOKEN=ghp_...                # github.com/settings/tokens (repo or public_repo scope)
@@ -313,7 +329,7 @@ AGENTREVIEW_FAIL_ON=HIGH             # Default fail-on severity
 AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # Skip data disclosure prompt
 ```
 
-The provider is auto-detected from the model name: `claude-*` → Anthropic, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
+The provider is auto-detected from the model name: `claude-*` → Anthropic, `gemini-*` → Google, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
 
 ### GitHub Token Scopes
 
@@ -436,6 +452,7 @@ AgentReview sends code (PR diffs or source files) to your configured LLM provide
 
 - **OpenAI:** https://openai.com/policies/api-data-usage-policies
 - **Anthropic:** https://www.anthropic.com/legal/privacy
+- **Google:** https://ai.google.dev/terms
 
 To suppress the interactive disclosure prompt: set `AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1` or pass `--yes`.
 
