@@ -17,6 +17,9 @@ inputs:
   openai-api-key:
     description: 'OpenAI API key (required if not using anthropic-api-key)'
     required: false
+  google-api-key:
+    description: 'Google AI (Gemini) API key (required if not using anthropic/openai)'
+    required: false
   model:
     description: 'LLM model to use'
     required: false

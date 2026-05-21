@@ -175,7 +175,7 @@ export interface CodebaseContext {
 // ─── Ensemble Types ─────────────────────────────────────────────────────────────
 
 export interface ModelConfig {
-  provider: 'openai' | 'anthropic';
+  provider: 'openai' | 'anthropic' | 'google';
   model: string;
   apiKey: string;
   label: string;  // e.g. 'claude-sonnet', 'gpt-4o' — used in source tracking
@@ -251,7 +251,7 @@ export interface FixReport {
 // ─── Config Types ─────────────────────────────────────────────────────────────
 
 export interface LLMConfig {
-  provider: 'openai' | 'anthropic';
+  provider: 'openai' | 'anthropic' | 'google';
   model: string;
   apiKey: string;
   timeout: number;

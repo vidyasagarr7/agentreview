@@ -25,10 +25,11 @@ const MODEL_CONTEXT_TOKENS: Record<string, number> = {
   'claude-3-haiku-20240307': 200000,
 };
 
-const SUPPORTED_PROVIDERS = new Set(['openai', 'anthropic']);
+const SUPPORTED_PROVIDERS = new Set(['openai', 'anthropic', 'google']);
 
-function detectProvider(model: string): 'openai' | 'anthropic' {
+function detectProvider(model: string): 'openai' | 'anthropic' | 'google' {
   if (model.startsWith('claude')) return 'anthropic';
+  if (model.startsWith('gemini')) return 'google';
   return 'openai';
 }
 
@@ -60,19 +61,32 @@ export class ConfigManager {
     if (!SUPPORTED_PROVIDERS.has(rawProvider)) {
       throw new ConfigError(
         `LLM provider "${rawProvider}" is not supported. ` +
-        `Use "openai" or "anthropic". Set LLM_PROVIDER=openai or LLM_PROVIDER=anthropic.`
+        `Use "openai", "anthropic", or "google". Set LLM_PROVIDER=openai, LLM_PROVIDER=anthropic, or LLM_PROVIDER=google.`
       );
     }
 
-    const provider = rawProvider as 'openai' | 'anthropic';
+    const provider = rawProvider as 'openai' | 'anthropic' | 'google';
 
     // Resolve API key based on provider
-    const apiKey = provider === 'anthropic'
-      ? process.env.ANTHROPIC_API_KEY
-      : process.env.OPENAI_API_KEY;
+    let apiKey: string | undefined;
+    switch (provider) {
+      case 'anthropic':
+        apiKey = process.env.ANTHROPIC_API_KEY;
+        break;
+      case 'google':
+        apiKey = process.env.GEMINI_API_KEY;
+        break;
+      default:
+        apiKey = process.env.OPENAI_API_KEY;
+    }
 
     if (!apiKey) {
-      const envVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+      const envVarMap: Record<string, string> = {
+        anthropic: 'ANTHROPIC_API_KEY',
+        google: 'GEMINI_API_KEY',
+        openai: 'OPENAI_API_KEY',
+      };
+      const envVar = envVarMap[provider];
       throw new ConfigError(
         `${envVar} not found.\n\n` +
         `Set the ${envVar} environment variable:\n` +
@@ -118,24 +132,37 @@ export class ConfigManager {
    */
   parseEnsembleModels(spec: string): ModelConfig[] {
     return spec.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
-      let provider: 'openai' | 'anthropic';
+      let provider: 'openai' | 'anthropic' | 'google';
       let model: string;
 
       if (entry.includes(':')) {
         const [p, m] = entry.split(':', 2);
-        provider = p as 'openai' | 'anthropic';
+        provider = p as 'openai' | 'anthropic' | 'google';
         model = m;
       } else {
         model = entry;
         provider = detectProvider(model);
       }
 
-      const apiKey = provider === 'anthropic'
-        ? process.env.ANTHROPIC_API_KEY
-        : process.env.OPENAI_API_KEY;
+      let apiKey: string | undefined;
+      switch (provider) {
+        case 'anthropic':
+          apiKey = process.env.ANTHROPIC_API_KEY;
+          break;
+        case 'google':
+          apiKey = process.env.GEMINI_API_KEY;
+          break;
+        default:
+          apiKey = process.env.OPENAI_API_KEY;
+      }
 
       if (!apiKey) {
-        const envVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+        const envVarMap: Record<string, string> = {
+          anthropic: 'ANTHROPIC_API_KEY',
+          google: 'GEMINI_API_KEY',
+          openai: 'OPENAI_API_KEY',
+        };
+        const envVar = envVarMap[provider];
         throw new ConfigError(`${envVar} required for ensemble model "${model}"`);
       }
 

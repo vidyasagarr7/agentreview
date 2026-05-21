@@ -22,39 +22,59 @@ export function parseInputs(): ActionInputs {
   // --- API key & provider resolution ---
   const anthropicKey = core.getInput('anthropic-api-key');
   const openaiKey = core.getInput('openai-api-key');
+  const googleKey = core.getInput('google-api-key');
 
-  if (!anthropicKey && !openaiKey) {
+  if (!anthropicKey && !openaiKey && !googleKey) {
     throw new Error(
-      'No API key provided. Set either anthropic-api-key or openai-api-key.',
+      'No API key provided. Set anthropic-api-key, openai-api-key, or google-api-key.',
     );
   }
 
-  // Anthropic wins when both are provided
-  const provider: 'anthropic' | 'openai' = anthropicKey ? 'anthropic' : 'openai';
-  const apiKey = anthropicKey || openaiKey;
+  // Priority: anthropic > openai > google
+  const provider: 'anthropic' | 'openai' | 'google' = anthropicKey ? 'anthropic' : openaiKey ? 'openai' : 'google';
+  const apiKey = anthropicKey || openaiKey || googleKey;
 
-  // Mask API key in logs
+  // Mask API keys in logs
   core.setSecret(apiKey);
+  if (anthropicKey) core.setSecret(anthropicKey);
+  if (openaiKey) core.setSecret(openaiKey);
+  if (googleKey) core.setSecret(googleKey);
 
   // --- Model ---
-  const model = core.getInput('model') || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
+  const defaultModels: Record<string, string> = {
+    anthropic: 'claude-sonnet-4-20250514',
+    openai: 'gpt-4o',
+    google: 'gemini-2.5-flash',
+  };
+  const model = core.getInput('model') || defaultModels[provider];
 
   // Cross-provider validation
-  if ((model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3')) && provider === 'anthropic') {
+  if ((model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3')) && provider !== 'openai') {
     throw new Error(
-      `Model "${model}" is an OpenAI model but the resolved provider is anthropic. ` +
-      'Provide openai-api-key instead of anthropic-api-key for OpenAI models.',
+      `Model "${model}" is an OpenAI model but the resolved provider is ${provider}. ` +
+      'Provide openai-api-key for OpenAI models.',
     );
   }
-  if (model.startsWith('claude') && provider === 'openai') {
+  if (model.startsWith('claude') && provider !== 'anthropic') {
     throw new Error(
-      `Model "${model}" is an Anthropic model but the resolved provider is openai. ` +
-      'Provide anthropic-api-key instead of openai-api-key for Anthropic models.',
+      `Model "${model}" is an Anthropic model but the resolved provider is ${provider}. ` +
+      'Provide anthropic-api-key for Anthropic models.',
+    );
+  }
+  if (model.startsWith('gemini') && provider !== 'google') {
+    throw new Error(
+      `Model "${model}" is a Google model but the resolved provider is ${provider}. ` +
+      'Provide google-api-key for Google models.',
     );
   }
 
   // Provider-aware context tokens
-  const contextTokens = provider === 'anthropic' ? 200000 : 128000;
+  const contextTokensMap: Record<string, number> = {
+    anthropic: 200000,
+    google: 1000000,
+    openai: 128000,
+  };
+  const contextTokens = contextTokensMap[provider] ?? 128000;
 
   const llmConfig: LLMConfig = {
     provider,

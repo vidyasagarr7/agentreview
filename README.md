@@ -17,7 +17,7 @@ AI-powered multi-lens code review for pull requests and codebases — security, 
 - 🔒 **Security scanner** — Deep codebase security analysis across 8 domains
 - ⚡ **GitHub Action** — Drop-in CI/CD integration with PR comments and step summaries
 - 🔌 **Custom lenses** — Write your own review perspectives as JSON
-- 📝 **Dual provider support** — Works with both OpenAI and Anthropic models
+- 📝 **Multi-provider support** — Works with OpenAI, Anthropic, and Google Gemini models
 - 🚀 **CI-friendly** — `--fail-on` exit codes for gate-able pipelines
 
 ## Quick Start
@@ -35,6 +35,20 @@ AI-powered multi-lens code review for pull requests and codebases — security, 
 ```bash
 npm install -g agentreview
 agentreview https://github.com/owner/repo/pull/123
+```
+
+### Using Gemini
+
+```yaml
+- uses: vidyasagarr7/agentreview@v1
+  with:
+    google-api-key: ${{ secrets.GEMINI_API_KEY }}
+    model: gemini-2.5-flash
+```
+
+```bash
+export GEMINI_API_KEY=...
+agentreview https://github.com/owner/repo/pull/123 --model gemini-2.5-flash
 ```
 
 ## GitHub Action
@@ -81,8 +95,9 @@ jobs:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `anthropic-api-key` | — | Anthropic API key (required if not using `openai-api-key`) |
-| `openai-api-key` | — | OpenAI API key (required if not using `anthropic-api-key`) |
+| `anthropic-api-key` | — | Anthropic API key (required if not using another provider key) |
+| `openai-api-key` | — | OpenAI API key (required if not using another provider key) |
+| `google-api-key` | — | Google AI (Gemini) API key (required if not using another provider key) |
 | `model` | `claude-sonnet-4-20250514` | LLM model to use |
 | `lenses` | `all` | Comma-separated lenses or `all` |
 | `fail-on` | — | Fail if findings ≥ severity (`CRITICAL\|HIGH\|MEDIUM\|LOW\|INFO`) |
@@ -212,7 +227,7 @@ agentreview scan https://github.com/owner/repo --branch develop
 |------|---------|-------------|
 | `--focus <domains>` | all | Comma-separated security domains |
 | `--model <model>` | — | LLM model override |
-| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--format <format>` | `markdown` | Output format: `markdown`, `json`, or `sarif` |
 | `--output <file>` | — | Write report to file |
 | `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
 | `--redact` | `false` | Redact secret patterns before sending to LLM |
@@ -300,20 +315,21 @@ agentreview https://github.com/owner/repo/pull/123 --no-validate
 # Provider keys (at least one required)
 OPENAI_API_KEY=sk-...               # OpenAI API key
 ANTHROPIC_API_KEY=sk-ant-...        # Anthropic API key
+GEMINI_API_KEY=...                   # Google AI (Gemini) API key
 
 # Required
 GITHUB_TOKEN=ghp_...                # github.com/settings/tokens (repo or public_repo scope)
 
 # Optional defaults
 AGENTREVIEW_MODEL=gpt-4o            # Default model
-AGENTREVIEW_FORMAT=markdown          # Default format (markdown|json)
+AGENTREVIEW_FORMAT=markdown          # Default format (markdown|json|sarif)
 AGENTREVIEW_LENSES=all               # Default lenses
 AGENTREVIEW_TIMEOUT=60               # Per-agent timeout in seconds
 AGENTREVIEW_FAIL_ON=HIGH             # Default fail-on severity
 AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # Skip data disclosure prompt
 ```
 
-The provider is auto-detected from the model name: `claude-*` → Anthropic, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
+The provider is auto-detected from the model name: `claude-*` → Anthropic, `gemini-*` → Google, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
 
 ### GitHub Token Scopes
 
@@ -366,6 +382,39 @@ Custom lenses are stored in `~/.agentreview/lenses/` and loaded automatically.
 
 See [GitHub Action](#github-action) above for full configuration.
 
+### SARIF Output (GitHub Security Tab)
+
+AgentReview can output findings in [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) format, the standard for GitHub Code Scanning. This displays findings inline in PR diffs and in the repository's Security tab.
+
+```bash
+# Generate SARIF output
+agentreview https://github.com/owner/repo/pull/123 --format sarif --output results.sarif
+
+# Security scan with SARIF output
+agentreview scan https://github.com/owner/repo --format sarif --output scan.sarif
+```
+
+**GitHub Actions integration:**
+
+```yaml
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write  # Required for SARIF upload
+    steps:
+      - uses: vidyasagarr7/agentreview@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          format: sarif
+          output: results.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+```
+
 ### Manual GitHub Actions Workflow
 
 ```yaml
@@ -403,6 +452,7 @@ AgentReview sends code (PR diffs or source files) to your configured LLM provide
 
 - **OpenAI:** https://openai.com/policies/api-data-usage-policies
 - **Anthropic:** https://www.anthropic.com/legal/privacy
+- **Google:** https://ai.google.dev/terms
 
 To suppress the interactive disclosure prompt: set `AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1` or pass `--yes`.
 

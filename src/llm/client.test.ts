@@ -34,6 +34,17 @@ vi.mock('@anthropic-ai/sdk', () => {
   };
 });
 
+// Mock the Google GenAI module
+vi.mock('@google/genai', () => {
+  return {
+    GoogleGenAI: vi.fn().mockImplementation(() => ({
+      models: {
+        generateContent: vi.fn(),
+      },
+    })),
+  };
+});
+
 describe('LLMClient', () => {
   it('returns content on success', async () => {
     const OpenAI = (await import('openai')).default;
@@ -141,6 +152,77 @@ describe('LLMClient', () => {
     await client.complete('system', 'user');
     const callArgs = mockCreate.mock.calls[0][0];
     expect(callArgs.max_tokens).toBe(4096);
+  });
+
+  it('Gemini provider creates client and calls generateContent', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const mockGenerateContent = vi.fn().mockResolvedValueOnce({
+      text: 'gemini result',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(() => ({
+      models: { generateContent: mockGenerateContent },
+    }));
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    const result = await client.complete('system', 'user');
+    expect(result).toBe('gemini result');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    const callArgs = mockGenerateContent.mock.calls[0][0];
+    expect(callArgs.model).toBe('gemini-2.5-flash');
+    expect(callArgs.config.systemInstruction).toBe('system');
+    expect(callArgs.contents).toBe('user');
+  });
+
+  it('defaults Gemini maxOutputTokens to 4096 when no options provided', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const mockGenerateContent = vi.fn().mockResolvedValueOnce({
+      text: 'result',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(() => ({
+      models: { generateContent: mockGenerateContent },
+    }));
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    await client.complete('system', 'user');
+    const callArgs = mockGenerateContent.mock.calls[0][0];
+    expect(callArgs.config.maxOutputTokens).toBe(4096);
+  });
+
+  it('passes custom maxTokens to Gemini provider', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const mockGenerateContent = vi.fn().mockResolvedValueOnce({
+      text: 'result',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(() => ({
+      models: { generateContent: mockGenerateContent },
+    }));
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    const result = await client.complete('system', 'user', undefined, { maxTokens: 8192 });
+    expect(result).toBe('result');
+    const callArgs = mockGenerateContent.mock.calls[0][0];
+    expect(callArgs.config.maxOutputTokens).toBe(8192);
+  });
+
+  it('throws LLMError on empty Gemini response', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const mockGenerateContent = vi.fn().mockResolvedValueOnce({
+      text: '',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(() => ({
+      models: { generateContent: mockGenerateContent },
+    }));
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(LLMError);
   });
 
   it('retries on 429 and throws after max attempts', async () => {
