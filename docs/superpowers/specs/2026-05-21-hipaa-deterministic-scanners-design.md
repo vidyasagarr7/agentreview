@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-21
 **Author:** Vex
-**Status:** DRAFT — awaiting design review + human approval
+**Status:** REVISED — incorporates design review findings
 
 ---
 
@@ -74,16 +74,16 @@ src/hipaa/scanners/
 ### 3.2 Scanner Interface
 
 ```typescript
-interface DeterministicFinding {
+// DeterministicFinding extends AgentFinding with extra fields (per review: use option 1 — extend AgentFinding)
+// Add optional fields to AgentFinding in types/index.ts:
+//   scannerId?: string
+//   regulation?: string
+//   deterministic?: boolean
+
+interface DeterministicFinding extends AgentFinding {
   scannerId: string;          // e.g., 'phi-in-logs'
-  severity: FindingSeverity;
-  category: string;
-  location: string;           // file.ts:42
-  summary: string;
-  detail: string;
-  suggestion: string;
   regulation: string;         // e.g., '45 CFR §164.312(b)'
-  deterministic: true;        // marks as non-LLM finding
+  deterministic: true;        // marks as non-LLM finding, never filtered by validation
 }
 
 interface Scanner {
@@ -114,7 +114,7 @@ Scan Pipeline (existing)
       Combined findings (deterministic are marked, higher confidence)
 ```
 
-Deterministic findings merge with LLM findings. When both find the same issue (same file + same line ± 5), the deterministic finding takes precedence (confidence: 100). This means:
+Deterministic findings merge with LLM findings using existing `dedupScanFindings` location-proximity logic. When both find the same issue (same file, parsed line ± 5 from location string `file.ts:42`), the deterministic finding takes precedence (confidence: 100). This means:
 - Deterministic findings are NEVER filtered by validation
 - They appear first in the report
 - They're tagged with the specific HIPAA regulation
@@ -136,13 +136,23 @@ Deterministic findings merge with LLM findings. When both find the same issue (s
 2. Within each log call's arguments, check for PHI field names from `phi-patterns.ts`
 3. Also check template literals in log calls for PHI interpolation
 
-**Regex approach:**
+**Regex approach (revised per review — line-range instead of paren parsing):**
+
+Instead of trying to parse JS with regex (nested parens break), use a **line-range approach:**
+1. Find lines containing log calls (`console.log`, `logger.info`, etc.)
+2. Scan that line + ±2 lines for PHI field names
+3. This is simpler and catches multiline log statements
+
 ```typescript
-// Match: console.log(anything with PHI field name)
-// Match: logger.info(anything with PHI field name)
-const LOG_CALL = /(?:console|logger|log)\.\w+\s*\(([^)]*)\)/g;
-const TEMPLATE_LOG = /(?:console|logger|log)\.\w+\s*\(`[^`]*\$\{[^}]*(?:PHI_FIELDS_PATTERN)[^}]*\}[^`]*`\)/g;
+// Step 1: Find log call lines
+const LOG_LINE = /(?:console|logger|log)\.[a-z]+\s*\(/i;
+// Step 2: Check line + neighbors for PHI fields
+// Uses PHI field set from phi-patterns.ts
 ```
+
+**False positive mitigation (per review):**
+- Only runs on files matching `phiSources` config patterns, OR files importing healthcare modules
+- Skips test files by default (`*.test.ts`, `*.spec.ts`, `__tests__/`)
 
 **Severity:**
 - CRITICAL: Direct PHI field in log call (`console.log(patient.ssn)`)
@@ -153,9 +163,9 @@ const TEMPLATE_LOG = /(?:console|logger|log)\.\w+\s*\(`[^`]*\$\{[^}]*(?:PHI_FIEL
 
 **Pattern matching:**
 ```typescript
-const SELECT_STAR = /SELECT\s+\*\s+FROM\s+(\w+)/gi;
+const SELECT_STAR = /SELECT[\s\S]{0,20}\*[\s\S]{0,20}FROM\s+(\w+)/gi;  // handles multiline SQL
 // Match table names against PHI tables
-const PHI_TABLES = ['patient', 'patients', 'encounter', 'encounters', 'diagnosis', 'medication', 'observation', 'condition', 'allergy', 'immunization', 'procedure', 'claim', 'coverage', 'person', 'member'];
+const PHI_TABLES = ['patient', 'patients', 'encounter', 'encounters', 'diagnosis', 'medication', 'observation', 'condition', 'allergy', 'immunization', 'procedure', 'claim', 'claims', 'claim_line', 'coverage', 'person', 'member', 'explanation_of_benefits', 'consent', 'care_team', 'practitioner'];
 
 // ORM patterns
 const ORM_FIND_ALL = /(?:Patient|Encounter|Observation|Condition|Medication)\.(findAll|find|getAll|list|query)\s*\(/g;
@@ -175,6 +185,8 @@ const HTTP_URL = /['"`](http:\/\/[^'"`\s]+)['"`]/g;
 
 **Only runs on files in PHI-relevant paths** (src/services/patient*, src/fhir/*, etc. from config). Otherwise too many false positives.
 
+**Allowlist (per review):** Skip `http://localhost`, `http://127.0.0.1`, `http://0.0.0.0`, and URLs in test files.
+
 **Severity:**
 - CRITICAL: HTTP URL in PHI-handling file
 - HIGH: HTTP URL in any API/route file
@@ -183,8 +195,8 @@ const HTTP_URL = /['"`](http:\/\/[^'"`\s]+)['"`]/g;
 
 **Patterns:**
 ```typescript
-// Missing _elements in FHIR search
-const FHIR_SEARCH = /\/(?:Patient|Observation|Condition|Encounter|MedicationRequest)\?/g;
+// Missing _elements in FHIR search (expanded per review)
+const FHIR_SEARCH = /\/(?:Patient|Observation|Condition|Encounter|MedicationRequest|AllergyIntolerance|DiagnosticReport|Immunization|Claim|ExplanationOfBenefit)\?/g;
 // Flag if same line/nearby doesn't contain _elements=
 
 // Overly broad SMART scopes
@@ -214,6 +226,10 @@ const HL7_LOG = /(?:console|logger|log)\.\w+\s*\(.*(?:hl7|adt|oru|adt_a01|messag
 // Raw HL7 pipe-delimited message in string
 const HL7_RAW = /MSH\|[^|]*\|/g;  // Actual HL7 message content
 // If found in log/console context → CRITICAL
+
+// Additional HL7 segments with PHI (per review)
+// IN1/IN2 (Insurance), DG1 (Diagnosis), GT1 (Guarantor)
+const HL7_PHI_SEGMENTS = /(?:PID|NK1|IN1|IN2|DG1|GT1)\|/g;
 ```
 
 **Severity:**
@@ -245,7 +261,37 @@ Integration test: run all scanners on test/fixtures/vulnerable-app + a new HIPAA
 
 ---
 
-## 7. Success Criteria
+## 7. Scanner Configuration
+
+Allow disabling individual scanners via `.agentreview.yml`:
+```yaml
+hipaa:
+  scanners:
+    phi-in-logs: true
+    select-star: true
+    http-phi: false       # disable if too noisy
+    fhir-rules: true
+    hl7-phi: true
+```
+
+All scanners enabled by default. Patterns must avoid catastrophic backtracking (no nested quantifiers).
+
+---
+
+## 8. Integration Points
+
+**PR review:** Fetch full file content for changed files from PR head (not just diffs). Pass to scanners.
+
+**Scan:** Hook between chunk LLM dispatch and dedup:
+```
+chunks → LLM dispatch → [deterministic scan] → merge → dedup → baseline → result
+```
+
+**Action:** Deterministic findings appear in inline annotations with regulation citations.
+
+---
+
+## 9. Success Criteria
 
 1. Each scanner has >90% true positive rate on test fixtures
 2. False positive rate <20% on real codebases
