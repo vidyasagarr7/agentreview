@@ -143,21 +143,24 @@ async function runScan(target: string, opts: {
 
   const scanSpinner = ora(`Scanning ${target}…`).start();
 
+  // Wire progress callback into scan options
+  scanOptions.onProgress = (chunkId, status, meta) => {
+    if (status === 'started') {
+      const spinner = ora(`  [${chunkId}] Scanning ${meta?.domain ?? 'unknown'} (${meta?.fileCount ?? 0} files)…`).start();
+      chunkSpinners.set(chunkId, spinner);
+    } else if (status === 'completed') {
+      chunkSpinners.get(chunkId)?.succeed(
+        `  [${chunkId}] Done — ${meta?.findingCount ?? 0} finding(s) (${((meta?.durationMs ?? 0) / 1000).toFixed(1)}s)`,
+      );
+      chunkSpinners.delete(chunkId);
+    } else {
+      chunkSpinners.get(chunkId)?.fail(`  [${chunkId}] Failed`);
+      chunkSpinners.delete(chunkId);
+    }
+  };
+
   const result = await scanCodebase(target, scanOptions, llm, {
-    onProgress: (chunkId, status, meta) => {
-      if (status === 'started') {
-        const spinner = ora(`  [${chunkId}] Scanning ${meta?.domain ?? 'unknown'} (${meta?.fileCount ?? 0} files)…`).start();
-        chunkSpinners.set(chunkId, spinner);
-      } else if (status === 'completed') {
-        chunkSpinners.get(chunkId)?.succeed(
-          `  [${chunkId}] Done — ${meta?.findingCount ?? 0} finding(s) (${((meta?.durationMs ?? 0) / 1000).toFixed(1)}s)`,
-        );
-        chunkSpinners.delete(chunkId);
-      } else {
-        chunkSpinners.get(chunkId)?.fail(`  [${chunkId}] Failed`);
-        chunkSpinners.delete(chunkId);
-      }
-    },
+    branch: opts.branch,
   });
 
   scanSpinner.succeed(`Scan complete: ${result.filesScanned} files scanned`);

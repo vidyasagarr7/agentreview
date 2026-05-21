@@ -53,6 +53,7 @@ export interface ScanOptions {
   validate: boolean;
   verbose: boolean;
   redact: boolean;
+  onProgress?: ScanProgressCallback;
 }
 
 // ─── Results ──────────────────────────────────────────────────────────────────
