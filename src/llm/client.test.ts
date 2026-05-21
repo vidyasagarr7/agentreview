@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LLMClient, LLMError } from './client.js';
+import { LLMClient, LLMError, type LLMCompleteOptions } from './client.js';
 import type { LLMConfig } from '../types/index.js';
 
 const testConfig: LLMConfig = {
@@ -73,6 +73,74 @@ describe('LLMClient', () => {
 
     const client = new LLMClient(testConfig);
     await expect(client.complete('system', 'user')).rejects.toThrow(/model not found/i);
+  });
+
+  it('passes maxTokens to OpenAI provider when specified', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockResolvedValueOnce({
+      choices: [{ message: { content: 'result' } }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
+      chat: { completions: { create: mockCreate } },
+    }));
+
+    const client = new LLMClient(testConfig);
+    const result = await client.complete('system', 'user', undefined, { maxTokens: 8192 });
+    expect(result).toBe('result');
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.max_tokens).toBe(8192);
+  });
+
+  it('does not include max_tokens for OpenAI when no options provided', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockResolvedValueOnce({
+      choices: [{ message: { content: 'result' } }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(() => ({
+      chat: { completions: { create: mockCreate } },
+    }));
+
+    const client = new LLMClient(testConfig);
+    await client.complete('system', 'user');
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.max_tokens).toBeUndefined();
+  });
+
+  it('passes maxTokens to Anthropic provider when specified', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const mockCreate = vi.fn().mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'result' }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Anthropic as any).mockImplementation(() => ({
+      messages: { create: mockCreate },
+    }));
+
+    const anthropicConfig: LLMConfig = { ...testConfig, provider: 'anthropic' };
+    const client = new LLMClient(anthropicConfig);
+    const result = await client.complete('system', 'user', undefined, { maxTokens: 8192 });
+    expect(result).toBe('result');
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.max_tokens).toBe(8192);
+  });
+
+  it('defaults Anthropic max_tokens to 4096 when no options provided', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const mockCreate = vi.fn().mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'result' }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Anthropic as any).mockImplementation(() => ({
+      messages: { create: mockCreate },
+    }));
+
+    const anthropicConfig: LLMConfig = { ...testConfig, provider: 'anthropic' };
+    const client = new LLMClient(anthropicConfig);
+    await client.complete('system', 'user');
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.max_tokens).toBe(4096);
   });
 
   it('retries on 429 and throws after max attempts', async () => {
