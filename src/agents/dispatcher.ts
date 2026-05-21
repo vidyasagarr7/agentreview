@@ -6,6 +6,7 @@ import { buildPrompt } from './prompt-builder.js';
 export interface DispatchOptions {
   verbose?: boolean;
   timeoutMs?: number;
+  hipaaContext?: string;
   onProgress?: (lensId: string, status: 'started' | 'completed' | 'failed', durationMs?: number) => void;
 }
 
@@ -52,7 +53,7 @@ async function dispatchSingleAgent(
   options.onProgress?.(lens.id, 'started');
 
   try {
-    const { system, user } = buildPrompt(lens, context);
+    const { system, user } = buildPrompt(lens, context, { hipaaContext: options.hipaaContext });
     const timeoutMs = options.timeoutMs ?? 60000;
 
     const raw = await withTimeout(

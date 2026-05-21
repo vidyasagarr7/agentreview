@@ -7,7 +7,7 @@ export async function runEnsemble(
   config: EnsembleConfig,
   lenses: Lens[],
   context: ReviewContext,
-  options?: { verbose?: boolean },
+  options?: { verbose?: boolean; hipaaContext?: string },
 ): Promise<EnsembleResult> {
   const verbose = options?.verbose ?? false;
 
@@ -16,7 +16,7 @@ export async function runEnsemble(
     config.models,
     lenses,
     context,
-    { verbose, timeoutMs: config.timeout * 1000 },
+    { verbose, timeoutMs: config.timeout * 1000, hipaaContext: options?.hipaaContext },
   );
 
   // Normalize findings per model into ModelFinding[]

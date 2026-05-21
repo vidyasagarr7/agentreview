@@ -15,6 +15,7 @@ import { render } from '../report/renderer.js';
 import { ConfigManager, ConfigError } from './config.js';
 import { loadRepoConfig } from '../config/repo-config.js';
 import type { RepoConfig } from '../config/repo-config.js';
+import { buildHipaaContext } from '../lenses/builtin/hipaa.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
@@ -185,6 +186,12 @@ async function reviewPR(prUrl: string, opts: {
       process.exit(1);
     }
 
+    // Build HIPAA context for ensemble mode if applicable
+    let ensembleHipaaContext: string | undefined;
+    if (opts.repoConfig?.hipaa && lenses.some((l) => l.id === 'hipaa')) {
+      ensembleHipaaContext = buildHipaaContext(opts.repoConfig.hipaa);
+    }
+
     const ensembleSpinner = ora(`Running ensemble review with ${ensembleModels.length} models: ${ensembleModels.map((m) => m.label).join(', ')}…`).start();
 
     const ensembleResult = await runEnsemble(
@@ -196,7 +203,7 @@ async function reviewPR(prUrl: string, opts: {
       },
       lenses,
       context,
-      { verbose: opts.verbose },
+      { verbose: opts.verbose, hipaaContext: ensembleHipaaContext },
     );
 
     ensembleSpinner.succeed(
@@ -234,9 +241,19 @@ async function reviewPR(prUrl: string, opts: {
   const llm = new LLMClient(llmConfig);
   const agentSpinners = new Map<string, ReturnType<typeof ora>>();
 
+  // ── Build HIPAA context if applicable ────────────────────────────────────
+  let hipaaContext: string | undefined;
+  if (opts.repoConfig?.hipaa && lenses.some((l) => l.id === 'hipaa')) {
+    hipaaContext = buildHipaaContext(opts.repoConfig.hipaa);
+    if (opts.verbose) {
+      console.error('🏥 HIPAA BAA registry context injected into review');
+    }
+  }
+
   const agentResults = await dispatchAgents(lenses, context, llm, {
     verbose: opts.verbose,
     timeoutMs: llmConfig.timeout * 1000,
+    hipaaContext,
     onProgress(lensId, status, durationMs) {
       if (status === 'started') {
         const spinner = ora(`[${lensId}] Analyzing…`).start();
