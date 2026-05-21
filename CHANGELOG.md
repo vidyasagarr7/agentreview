@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Per-repository configuration** (`.agentreview.yml`) — Drop a YAML config file in your repo root to set default lenses, model, fail-on severity, ignore patterns, and scan options. CLI flags and Action inputs take priority over the config file. Supports `ignore` glob patterns to exclude files (tests, migrations, generated code) from review.
+
 - **Incremental scan with baseline** (`--baseline`, `--update-baseline`, `--baseline-path`) — First scan creates a baseline of existing findings. Subsequent scans only report NEW findings not in the baseline, preventing teams from being overwhelmed by pre-existing issues when adopting the tool. Suppressed finding counts shown in reports and CLI summary.
 
 <<<<<<< HEAD

@@ -354,6 +354,53 @@ AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # Skip data disclosure prompt
 
 The provider is auto-detected from the model name: `claude-*` → Anthropic, `gemini-*` → Google, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
 
+### Per-Repository Configuration (`.agentreview.yml`)
+
+Drop a `.agentreview.yml` file in your repository root to configure AgentReview per-project. Settings in the config file override environment variable defaults, but CLI flags and GitHub Action inputs always take priority.
+
+**Priority order:** CLI flags / Action inputs > `.agentreview.yml` > environment variables > built-in defaults
+
+```yaml
+# .agentreview.yml
+lenses: [security, quality]
+fail-on: HIGH
+model: claude-sonnet-4-20250514
+validate: true
+min-confidence: 50
+codebase-context: true
+codebase-budget: 12000
+
+# Glob patterns for files to exclude from review
+ignore:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "migrations/**"
+  - "generated/**"
+  - "vendor/**"
+
+# Scan command defaults
+scan:
+  focus: [auth, secrets, injection]
+  redact: true
+  max-files: 100
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `lenses` | `string[]` | Lens IDs to run (e.g., `[security, quality]`) |
+| `fail-on` | `string` | Severity threshold for exit code 2 (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`) |
+| `model` | `string` | LLM model to use |
+| `validate` | `boolean` | Enable/disable confidence validation |
+| `min-confidence` | `number` | Minimum confidence score (0–100) |
+| `codebase-context` | `boolean` | Enable/disable codebase awareness |
+| `codebase-budget` | `number` | Token budget for codebase context |
+| `ignore` | `string[]` | Glob patterns for files to exclude from review |
+| `scan.focus` | `string[]` | Security domains to focus on |
+| `scan.redact` | `boolean` | Redact secrets before LLM submission |
+| `scan.max-files` | `number` | Maximum files to scan |
+
+All fields are optional. Unknown keys produce a warning but are otherwise ignored.
+
 ### GitHub Token Scopes
 
 | Repo type | Required scope |
