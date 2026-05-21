@@ -70,6 +70,12 @@ export interface AgentFinding {
   lenses: string[];
   confidenceScore?: number | undefined;
   disposition?: FindingDisposition;
+  scannerId?: string;
+  regulation?: string;
+  deterministic?: boolean;
+  scannerId?: string;
+  regulation?: string;
+  deterministic?: boolean;
 }
 
 export interface ParseError {
