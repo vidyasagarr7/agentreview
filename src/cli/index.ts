@@ -13,6 +13,8 @@ import { consolidate } from '../report/consolidator.js';
 import { validateAgentResults } from '../validation/validator.js';
 import { render } from '../report/renderer.js';
 import { ConfigManager, ConfigError } from './config.js';
+import { loadRepoConfig } from '../config/repo-config.js';
+import type { RepoConfig } from '../config/repo-config.js';
 import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
@@ -43,6 +45,8 @@ async function reviewPR(prUrl: string, opts: {
   yes: boolean;
   output?: string;
   inline: boolean;
+  ignore?: string[];
+  repoConfig?: RepoConfig;
 }): Promise<void> {
   const config = new ConfigManager();
 
@@ -158,7 +162,9 @@ async function reviewPR(prUrl: string, opts: {
   }
 
   // ── Build review context ──────────────────────────────────────────────────
-  const context = buildReviewContext(pr, pr.diff, pr.files, llmConfig.contextTokens);
+  const context = buildReviewContext(pr, pr.diff, pr.files, llmConfig.contextTokens, {
+    ignore: opts.ignore,
+  });
   if (codebaseCtx) {
     context.codebase = codebaseCtx;
   }
@@ -415,28 +421,37 @@ program
   .action(async (prUrl: string, opts) => {
     try {
       const config = new ConfigManager();
-      // Resolve --lens / --lenses (--lens is alias for --lenses)
-      const lensesValue: string = opts.lens ?? opts.lenses ?? config.getDefaultLenses();
-      // Resolve --fail-on: CLI flag overrides env var
-      const failOnValue: string | undefined = opts.failOn ?? config.getFailOnSeverity();
-      // Resolve timeout: CLI flag > env var (via ConfigManager) > hardcoded default
+
+      // Load per-repo .agentreview.yml (if present)
+      const repoConfig = await loadRepoConfig(process.cwd());
+      if (repoConfig && opts.verbose) {
+        console.error('\u{1F4C4} Loaded .agentreview.yml config');
+      }
+
+      // Merge priority: CLI flags > .agentreview.yml > env vars > defaults
+      const lensesValue: string = opts.lens ?? opts.lenses ?? (repoConfig?.lenses ? repoConfig.lenses.join(',') : null) ?? config.getDefaultLenses();
+      const failOnValue: string | undefined = opts.failOn ?? repoConfig?.failOn ?? config.getFailOnSeverity();
       const timeoutValue: number = opts.timeout ?? config.getTimeout();
+      const modelValue: string | undefined = opts.model ?? repoConfig?.model;
       await reviewPR(prUrl, {
         format: opts.format as ReportFormat,
         lenses: lensesValue,
         failOn: failOnValue,
         timeout: timeoutValue,
-        model: opts.model,
+        model: modelValue,
         post: opts.post,
         verbose: opts.verbose,
-        noDedup: !opts.dedup, // commander inverts --no-dedup → opts.dedup
-        validate: opts.validate,
-        minConfidence: opts.minConfidence ?? 40,
+        noDedup: !opts.dedup,
+        validate: opts.validate !== undefined ? opts.validate : (repoConfig?.validate ?? true),
+        minConfidence: opts.minConfidence ?? repoConfig?.minConfidence ?? 40,
         ensemble: opts.ensemble,
-        codebaseContext: opts.codebaseContext,
-        codebaseBudget: opts.codebaseBudget ?? 8000,
+        codebaseContext: opts.codebaseContext !== undefined ? opts.codebaseContext : (repoConfig?.codebaseContext ?? true),
+        codebaseBudget: opts.codebaseBudget ?? repoConfig?.codebaseBudget ?? 8000,
         yes: opts.yes,
         output: opts.output,
+        inline: opts.inline,
+        ignore: repoConfig?.ignore,
+        repoConfig: repoConfig ?? undefined,
       });
     } catch (err) {
       console.error(`\n❌ Unexpected error: ${(err as Error).message}`);
