@@ -1,5 +1,5 @@
 import type { ScanResult } from './types.js';
-import type { FindingSeverity } from '../types/index.js';
+import type { FindingSeverity, ReportFormat } from '../types/index.js';
 import { SEVERITY_ORDER } from '../types/index.js';
 
 // ─── Hotspot Scoring ──────────────────────────────────────────────────────────
@@ -128,11 +128,94 @@ function renderMarkdown(result: ScanResult): string {
   return lines.join('\n');
 }
 
+// ─── SARIF Renderer ───────────────────────────────────────────────────────────
+
+function mapScanSeverity(severity: FindingSeverity): 'error' | 'warning' | 'note' {
+  switch (severity) {
+    case 'CRITICAL':
+    case 'HIGH':
+      return 'error';
+    case 'MEDIUM':
+      return 'warning';
+    case 'LOW':
+    case 'INFO':
+      return 'note';
+  }
+}
+
+function parseScanLocation(location: string): { file: string; line: number } {
+  const match = location.match(/^(.+?)(?::(\d+))?$/);
+  if (!match) return { file: location, line: 1 };
+  return { file: match[1], line: parseInt(match[2] ?? '1', 10) };
+}
+
+export function renderScanSarif(result: ScanResult): string {
+  const sarifLog = {
+    $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json',
+    version: '2.1.0',
+    runs: [{
+      tool: {
+        driver: {
+          name: 'AgentReview Security Scanner',
+          version: '1.0.0',
+          informationUri: 'https://github.com/vidyasagarr7/agentreview',
+          rules: result.findings.map((f) => ({
+            id: f.id,
+            shortDescription: { text: f.summary },
+            fullDescription: { text: f.detail },
+            help: { text: f.suggestion, markdown: f.suggestion },
+            defaultConfiguration: { level: mapScanSeverity(f.severity) },
+            properties: {
+              tags: f.lenses,
+              category: f.category,
+              severity: f.severity,
+            },
+          })),
+        },
+      },
+      results: result.findings.map((f) => {
+        const loc = parseScanLocation(f.location);
+        return {
+          ruleId: f.id,
+          level: mapScanSeverity(f.severity),
+          message: { text: `${f.summary}\n\n${f.detail}\n\nSuggestion: ${f.suggestion}` },
+          locations: [{
+            physicalLocation: {
+              artifactLocation: { uri: loc.file },
+              region: { startLine: loc.line },
+            },
+          }],
+          properties: {
+            category: f.category,
+            severity: f.severity,
+          },
+        };
+      }),
+      invocations: [{
+        executionSuccessful: true,
+        properties: {
+          target: result.target,
+          branch: result.branch,
+          scannedAt: result.scannedAt,
+          filesScanned: result.filesScanned,
+        },
+      }],
+    }],
+  };
+
+  return JSON.stringify(sarifLog, null, 2);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function renderScanReport(result: ScanResult, format: 'markdown' | 'json'): string {
-  if (format === 'json') {
-    return JSON.stringify(result, null, 2);
+export function renderScanReport(result: ScanResult, format: ReportFormat): string {
+  switch (format) {
+    case 'json':
+      return JSON.stringify(result, null, 2);
+    case 'sarif':
+      return renderScanSarif(result);
+    case 'markdown':
+    default:
+      return renderMarkdown(result);
   }
-  return renderMarkdown(result);
 }

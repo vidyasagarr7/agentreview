@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **SARIF 2.1.0 output format** (`--format sarif`) — Outputs findings in [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) format for GitHub Code Scanning integration. Findings appear inline in PR diffs and in the repository Security tab. Works with both PR review and codebase scan commands. Upload via `github/codeql-action/upload-sarif@v3`.
+
 - **Confidence scoring & validation gates** — Findings are re-evaluated for accuracy; low-confidence results are automatically filtered. Configurable via `--validate`, `--no-validate`, and `--min-confidence <score>`.
 
 - **Auto-fix command** (`agentreview fix`) — Review → validate → generate patch → apply → verify → revert pipeline. Supports `--dry-run` for patch preview and `--min-confidence` to limit fixes to high-confidence findings.

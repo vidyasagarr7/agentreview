@@ -33,7 +33,7 @@ export function createScanCommand(): Command {
     .argument('<target>', 'GitHub URL (owner/repo) or local directory path')
     .option('--focus <areas>', 'Comma-separated security domains to focus on')
     .option('--model <model>', 'LLM model override')
-    .option('--format <format>', 'Output format (markdown|json)', 'markdown')
+    .option('--format <format>', 'Output format (markdown|json|sarif)', 'markdown')
     .option('--output <file>', 'Write report to file instead of stdout')
     .option('--fail-on <severity>', 'Exit with code 2 if findings at or above this severity')
     .option('--redact', 'Redact known secret patterns before sending to LLM', false)
@@ -89,9 +89,9 @@ async function runScan(target: string, opts: {
   }
 
   // Validate format
-  const format = opts.format as 'markdown' | 'json';
-  if (format !== 'markdown' && format !== 'json') {
-    console.error(`❌ Invalid --format: "${opts.format}". Use "markdown" or "json".`);
+  const format = opts.format as 'markdown' | 'json' | 'sarif';
+  if (format !== 'markdown' && format !== 'json' && format !== 'sarif') {
+    console.error(`❌ Invalid --format: "${opts.format}". Use "markdown", "json", or "sarif".`);
     process.exit(1);
   }
 

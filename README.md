@@ -152,7 +152,7 @@ agentreview https://github.com/owner/repo/pull/123 --fail-on HIGH --yes
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--format <format>` | `markdown` | Output format: `markdown`, `json`, or `sarif` |
 | `--lenses <ids>` | `all` | Comma-separated lens IDs or `all` |
 | `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
 | `--timeout <seconds>` | `60` | Per-agent timeout |
@@ -212,7 +212,7 @@ agentreview scan https://github.com/owner/repo --branch develop
 |------|---------|-------------|
 | `--focus <domains>` | all | Comma-separated security domains |
 | `--model <model>` | — | LLM model override |
-| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--format <format>` | `markdown` | Output format: `markdown`, `json`, or `sarif` |
 | `--output <file>` | — | Write report to file |
 | `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
 | `--redact` | `false` | Redact secret patterns before sending to LLM |
@@ -306,7 +306,7 @@ GITHUB_TOKEN=ghp_...                # github.com/settings/tokens (repo or public
 
 # Optional defaults
 AGENTREVIEW_MODEL=gpt-4o            # Default model
-AGENTREVIEW_FORMAT=markdown          # Default format (markdown|json)
+AGENTREVIEW_FORMAT=markdown          # Default format (markdown|json|sarif)
 AGENTREVIEW_LENSES=all               # Default lenses
 AGENTREVIEW_TIMEOUT=60               # Per-agent timeout in seconds
 AGENTREVIEW_FAIL_ON=HIGH             # Default fail-on severity
@@ -365,6 +365,39 @@ Custom lenses are stored in `~/.agentreview/lenses/` and loaded automatically.
 ### GitHub Action (primary)
 
 See [GitHub Action](#github-action) above for full configuration.
+
+### SARIF Output (GitHub Security Tab)
+
+AgentReview can output findings in [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) format, the standard for GitHub Code Scanning. This displays findings inline in PR diffs and in the repository's Security tab.
+
+```bash
+# Generate SARIF output
+agentreview https://github.com/owner/repo/pull/123 --format sarif --output results.sarif
+
+# Security scan with SARIF output
+agentreview scan https://github.com/owner/repo --format sarif --output scan.sarif
+```
+
+**GitHub Actions integration:**
+
+```yaml
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write  # Required for SARIF upload
+    steps:
+      - uses: vidyasagarr7/agentreview@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          format: sarif
+          output: results.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+```
 
 ### Manual GitHub Actions Workflow
 

@@ -90,7 +90,7 @@ export interface AgentResult {
 
 // ─── Report Types ─────────────────────────────────────────────────────────────
 
-export type ReportFormat = 'markdown' | 'json';
+export type ReportFormat = 'markdown' | 'json' | 'sarif';
 export type ReviewConfidence = 'NORMAL' | 'LOW';
 
 export interface FindingStats {

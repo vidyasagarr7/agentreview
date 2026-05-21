@@ -83,7 +83,7 @@ export function mapSeverity(severity: FindingSeverity): 'error' | 'warning' | 'n
 
 /** Parse "file.ts:42" into { file, line }. */
 export function parseLocation(location: string): { file: string; line: number } {
-  const match = location.match(/^(.+?)(?::(\\d+))?$/);
+  const match = location.match(/^(.+?)(?::(\d+))?$/);
   if (!match) return { file: location, line: 1 };
   return { file: match[1], line: parseInt(match[2] ?? '1', 10) };
 }
