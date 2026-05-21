@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { LensRegistry } from './registry.js';
 
 describe('LensRegistry', () => {
-  it('returns 3 built-in lenses', () => {
+  it('returns 5 built-in lenses', () => {
     const registry = new LensRegistry();
     const lenses = registry.getBuiltinLenses();
-    expect(lenses).toHaveLength(3);
+    expect(lenses).toHaveLength(5);
   });
 
   it('built-in lens IDs are correct', () => {
@@ -14,6 +14,8 @@ describe('LensRegistry', () => {
     expect(ids).toContain('security');
     expect(ids).toContain('architecture');
     expect(ids).toContain('quality');
+    expect(ids).toContain('hipaa');
+    expect(ids).toContain('soc2');
   });
 
   it('built-in lenses have substantial system prompts', () => {
@@ -23,10 +25,10 @@ describe('LensRegistry', () => {
     }
   });
 
-  it('resolveLenses("all") returns all 3 built-ins', () => {
+  it('resolveLenses("all") returns all 5 built-ins', () => {
     const registry = new LensRegistry();
     const lenses = registry.resolveLenses('all');
-    expect(lenses).toHaveLength(3);
+    expect(lenses).toHaveLength(5);
   });
 
   it('resolveLenses(["security"]) returns 1 lens', () => {
