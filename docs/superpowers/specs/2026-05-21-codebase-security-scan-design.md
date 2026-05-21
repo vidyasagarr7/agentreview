@@ -1,8 +1,9 @@
 # Design Spec: Codebase Security Scanner (`agentreview scan`)
 
 **Date:** 2026-05-21
-**Author:** Vex (design) — pending cross-agent review
-**Status:** DRAFT — awaiting human approval
+**Author:** Vex (design)
+**Status:** REVISED — incorporates design review findings (8 issues addressed)
+**Reviewer:** Subagent (security engineer / software architect) — Rating: 7/10 → SHIP WITH CHANGES
 
 ---
 
@@ -44,11 +45,12 @@ Options:
   --max-files <n>         Max files to analyze per chunk (default: 50)
   --budget <tokens>       Token budget per scan chunk (default: 100000)
   --branch <ref>          Branch/tag/SHA to scan (default: HEAD / default branch)
-  --post <pr-url>         Post scan results as a PR comment (for tracking)
+  --redact                Mask known secret patterns (AKIA*, ghp_*, sk-*, etc.) before sending to LLM
+  --issue                 Create a GitHub Issue with scan results (for tracking)
   --ensemble <models>     Multi-model scan (comma-separated)
   --timeout <seconds>     Per-chunk timeout
-  -v, --verbose           Verbose output
-  -y, --yes               Acknowledge data disclosure
+  -v, --verbose           Verbose output with progress reporting
+  -y, --yes               Acknowledge data disclosure (scan-specific warning)
 ```
 
 ### Examples
@@ -62,8 +64,14 @@ agentreview scan ./my-project --focus secrets,auth
 # CI gate: fail on HIGH or above
 agentreview scan https://github.com/myorg/myapp --fail-on HIGH --yes
 
+# Scan with secret redaction (safer for sensitive repos)
+agentreview scan ./my-project --focus secrets,auth --redact
+
 # Multi-model for high-confidence results
 agentreview scan ./my-project --ensemble claude-sonnet-4-20250514,gpt-4o
+
+# Create a GitHub Issue with results
+agentreview scan https://github.com/myorg/myapp --issue
 ```
 
 ---
@@ -79,7 +87,10 @@ src/scan/
   chunker.ts            # Groups files into LLM-sized scan chunks by security domain
   prompts.ts            # Security scan system prompts (deeper than PR security lens)
   orchestrator.ts       # Multi-chunk scan coordination + result merging
-  local-reader.ts       # Local filesystem repo reader
+  local-reader.ts       # Local filesystem repo reader (with sandbox enforcement)
+  clone.ts              # Shallow-clone helper for remote repos
+  dedup-scan.ts         # Scan-specific cross-chunk dedup (location-proximity + domain-aware)
+  redact.ts             # Secret pattern redaction before LLM transmission
   types.ts              # Scan-specific types
 ```
 
@@ -94,7 +105,7 @@ Target (GitHub URL or local path)
   │
   ▼
 ┌─────────────────────┐
-│  Source Resolution   │  → GitHub API (remote) or filesystem (local)
+│  Source Resolution   │  → Shallow clone (remote) or sandboxed filesystem (local)
 │  + File Discovery    │  → Walk tree, filter, prioritize security-relevant files
 └────────┬────────────┘
          │
@@ -137,11 +148,48 @@ Target (GitHub URL or local path)
 interface SourceReader {
   listFiles(): Promise<FileEntry[]>;
   readFile(path: string): Promise<string | null>;
+  cleanup?(): Promise<void>;  // For clone-based readers: remove temp dir
 }
 
-class GitHubSourceReader implements SourceReader { ... }   // Uses existing GitHubClient
-class LocalSourceReader implements SourceReader { ... }     // Uses fs
+class CloneSourceReader implements SourceReader { ... }    // git clone --depth 1, then read locally
+class LocalSourceReader implements SourceReader { ... }     // Sandboxed local fs reads
 ```
+
+**Remote repos use shallow clone (not per-file API fetching):**
+- `git clone --depth 1 --branch <ref> <url> <tmpdir>` — one operation, no API rate limits
+- After clone, use `LocalSourceReader` against the cloned directory
+- Cleanup: remove temp dir after scan completes (or on error)
+- Fallback: if `git` is not available, fall back to GitHub API with backpressure (track `x-ratelimit-remaining`, throttle at <100)
+
+**⚠️ SECURITY: Filesystem sandboxing (Finding 1 — CRITICAL):**
+
+All local file reads MUST be sandboxed:
+```typescript
+class LocalSourceReader implements SourceReader {
+  private rootReal: string;  // realpath-resolved root
+
+  constructor(targetPath: string) {
+    this.rootReal = fs.realpathSync(path.resolve(targetPath));
+  }
+
+  async readFile(relPath: string): Promise<string | null> {
+    const abs = path.resolve(this.rootReal, relPath);
+    const real = await fs.promises.realpath(abs);
+    // JAIL CHECK: resolved path must be within root
+    if (!real.startsWith(this.rootReal + path.sep) && real !== this.rootReal) {
+      return null;  // Symlink escape — skip silently
+    }
+    const stat = await fs.promises.lstat(abs);
+    if (!stat.isFile()) return null;  // Skip non-regular files (devices, pipes, etc.)
+    return fs.promises.readFile(real, 'utf-8');
+  }
+}
+```
+
+This prevents:
+- **Symlink traversal:** Symlinks resolving outside the root are rejected
+- **Path traversal:** All paths are resolved against the canonicalized root
+- **Device files:** Only regular files are read (`stat.isFile()` check)
 
 **Filtering rules:**
 - **Skip:** `node_modules/`, `vendor/`, `.git/`, `dist/`, `build/`, `__pycache__/`, binary files, images, fonts, lock files (`package-lock.json`, `yarn.lock`, `Gemfile.lock`)
@@ -173,11 +221,16 @@ interface ScanChunk {
 }
 ```
 
+**Token estimation strategy:**
+- Use `chars / 4` heuristic (conservative for code, matches existing `context-builder.ts` approach)
+- Apply **85% safety margin**: pack to 85K tokens on a 100K budget, reserving 15K for system prompt + response tokens
+- This is model-agnostic; the heuristic is close enough for both GPT and Claude tokenizers on code
+
 **Chunking algorithm:**
 1. Classify each file into a security domain (based on path + content heuristics)
 2. Within each domain, sort by priority tier
-3. Pack files into chunks up to token budget (default 100K tokens)
-4. If a single file exceeds budget, truncate to most relevant sections (top + any auth/crypto patterns found)
+3. Pack files into chunks up to token budget × 0.85 (safety margin)
+4. If a single file exceeds budget, use **head+tail truncation**: take first N/2 tokens (imports, declarations, class headers) + last N/2 tokens (exports, main logic, route registration). This captures the most security-relevant parts of any file without language-specific parsing.
 5. If total files exceed capacity, ensure P0-P2 files always get included; P3-P4 are best-effort
 
 **Domain classification heuristics:**
@@ -262,22 +315,89 @@ interface ScanResult {
 }
 ```
 
-**Orchestration flow:**
-1. Resolve source (GitHub or local) → get file list
-2. Run discovery → filter + prioritize
-3. Run chunker → produce scan chunks
-4. Dispatch chunks to LLM (parallel, max concurrency 3 to avoid rate limits)
-5. Parse findings from each chunk (reuse `parseFindings`)
-6. Cross-chunk dedup (reuse existing `dedup.ts` with minor adaptation)
-7. Optional: validation pass (reuse existing validator)
-8. Consolidate into ScanResult
+**Progress reporting:**
+The orchestrator exposes progress callbacks (same pattern as existing `dispatcher.ts`):
+```typescript
+onProgress?: (chunkId: string, status: 'started' | 'completed' | 'failed', meta?: {
+  domain: SecurityDomain;
+  fileCount: number;
+  durationMs?: number;
+  findingCount?: number;
+}) => void;
+```
+CLI displays: `[2/8 chunks] Scanning auth domain... (12 files)` → `[2/8 chunks] ✓ auth done (3.2s, 4 findings)`
 
-### 5.5 Report Adaptations
+**Orchestration flow:**
+1. Resolve source: shallow clone (remote) or sandboxed local reader
+2. Run discovery → filter + prioritize
+3. Optional: apply `--redact` — run `redact.ts` regex patterns over file contents before chunking
+4. Run chunker → produce scan chunks
+5. Dispatch chunks to LLM (parallel, max concurrency 3 to avoid rate limits)
+6. Parse findings from each chunk (reuse `parseFindings`)
+7. **Scan-specific cross-chunk dedup** (`dedup-scan.ts`) — NOT reusing `dedup.ts` directly:
+   - Location-proximity: findings on same file within ±5 lines = likely same issue → merge
+   - Cross-domain correlation: same file + similar category across domains → merge, keep highest severity
+   - No lens-based grouping (chunks map to domains, not lenses)
+8. Optional: validation pass (reuse existing validator)
+9. Consolidate into ScanResult
+10. Cleanup: remove shallow clone temp dir if applicable
+
+### 5.5 Secret Redaction (`redact.ts`)
+
+When `--redact` is enabled, file contents are processed before being sent to the LLM:
+
+```typescript
+const REDACT_PATTERNS: Array<{ name: string; regex: RegExp; replacement: string }> = [
+  { name: 'AWS Access Key', regex: /AKIA[0-9A-Z]{16}/g, replacement: '[REDACTED_AWS_KEY]' },
+  { name: 'GitHub Token', regex: /ghp_[a-zA-Z0-9]{36}/g, replacement: '[REDACTED_GH_TOKEN]' },
+  { name: 'OpenAI Key', regex: /sk-[a-zA-Z0-9]{48}/g, replacement: '[REDACTED_OPENAI_KEY]' },
+  { name: 'Generic Secret', regex: /(?<=['"])[a-zA-Z0-9+/]{40,}={0,2}(?=['"])/g, replacement: '[REDACTED_BASE64]' },
+  { name: 'Private Key', regex: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA )?PRIVATE KEY-----/g, replacement: '[REDACTED_PRIVATE_KEY]' },
+  { name: 'Connection String', regex: /(?:postgres|mysql|mongodb|redis):\/\/[^\s'"]+/g, replacement: '[REDACTED_CONN_STRING]' },
+];
+```
+
+The LLM can still detect *that* a hardcoded secret exists (it sees the `[REDACTED_*]` placeholder) without the actual secret value being transmitted. This significantly reduces the risk of sending real credentials to third-party APIs.
+
+### 5.6 Enhanced Data Disclosure
+
+Scan mode uses a **separate disclosure prompt** from PR review mode:
+
+```
+⚠️  CODEBASE SCAN DATA DISCLOSURE
+
+This scan will read and send the FULL CONTENTS of source files to an external
+LLM API ({provider}). This is a broader scope than PR diff review.
+
+Estimated: {fileCount} files will be sent to {provider} ({model}).
+
+This may include:
+  • Source code (proprietary logic, algorithms)
+  • Configuration files (potentially containing partial secrets)
+  • Environment files (.env, docker-compose) if present
+
+Recommendation: Use --redact to mask known secret patterns before transmission.
+
+Do you acknowledge and wish to proceed? (y/N)
+```
+
+For `--focus secrets` specifically, an additional warning:
+```
+⚠️  The 'secrets' focus area intentionally reads files likely to contain credentials.
+   Use --redact to prevent actual secret values from being sent to the LLM.
+```
+
+### 5.7 Report Adaptations
 
 The existing `ConsolidatedReport` type needs a **scan variant** that includes:
 - **Coverage summary:** which security domains were scanned, how many files per domain
 - **Risk posture:** overall severity distribution + hotspot files (files with most findings)
 - **File heat map:** top 10 files by finding count/severity
+
+**Output options:**
+- `--output <file>`: Write report to local file (primary for large scans)
+- `--issue`: Create a GitHub Issue with scan results (better than PR comments for codebase-wide findings; includes severity labels)
+- `stdout`: Default when no `--output` or `--issue` specified
 
 Markdown report header for scan mode:
 ```
@@ -312,19 +432,19 @@ Scanned at: 2026-05-21T07:00:00Z | Branch: main | Model: claude-sonnet-4-2025051
 
 | Component | Reuse | Adaptation Needed |
 |-----------|-------|-------------------|
-| `GitHubClient` | ✅ tree, file content | Add `getDefaultBranch()` method |
-| `CodebaseFetcher` | ✅ file fetching with concurrency | Increase `maxFiles` for scan mode |
+| `GitHubClient` | 🔧 minimal | Add `getDefaultBranch()` method. NOT used for bulk file fetching (use shallow clone instead) |
+| `CodebaseFetcher` | ❌ not reused for scan | Scan uses shallow clone + local reader instead of per-file API fetching |
 | `LLMClient` | ✅ full reuse | None |
 | `parseFindings` | ✅ full reuse | None |
-| `dedup.ts` | ✅ mostly | Adapt for cross-chunk (not cross-lens) dedup |
+| `dedup.ts` | 🔧 **new scan-specific** | Cross-chunk dedup needs location-proximity + domain-aware merging (see `dedup-scan.ts`) |
 | `validator.ts` | ✅ full reuse | None |
 | `scorer.ts` | ✅ full reuse | None |
 | `report/renderers/markdown.ts` | 🔧 partial | Add scan-specific header/summary sections |
 | `report/renderers/json.ts` | 🔧 partial | Add scan metadata fields |
 | `ConfigManager` | ✅ full reuse | None |
-| `disclosure.ts` | ✅ full reuse | None |
+| `disclosure.ts` | 🔧 extended | Add scan-specific disclosure warning about full file contents being sent to LLM |
 
-**New code estimate:** ~800-1200 lines across 8 files (scan module + CLI command + types + tests).
+**New code estimate:** ~1200-1600 lines across 12 files (scan module + CLI command + types + tests + dedup + redact + clone).
 
 ---
 
@@ -341,6 +461,16 @@ Scanned at: 2026-05-21T07:00:00Z | Branch: main | Model: claude-sonnet-4-2025051
 - Scan a small known-vulnerable test fixture repo (create `test/fixtures/vulnerable-app/`)
 - Verify findings are produced for planted vulnerabilities (hardcoded key, SQL injection, missing auth check)
 
+### Sandboxing Tests
+- `local-reader.test.ts`: symlink escape detection, path traversal rejection, non-regular file skip
+- Test with symlink pointing outside root → must return null
+- Test with `../../../etc/passwd` relative path → must return null
+
+### Redaction Tests
+- `redact.test.ts`: verify all pattern types are caught and replaced
+- Verify redacted content still allows LLM to identify secret presence
+- Verify non-secret content passes through unchanged
+
 ### Production Test (Phase 5.5)
 - Run against a real open-source repo with known vulnerabilities
 - Compare findings against known CVEs/issues
@@ -354,9 +484,9 @@ Scanned at: 2026-05-21T07:00:00Z | Branch: main | Model: claude-sonnet-4-2025051
 |------|--------|------------|
 | Token budget blowout on large repos | High cost, slow scans | Strict budget enforcement per chunk, priority-based file selection, skip low-priority files when budget exhausted |
 | Rate limiting on LLM API | Scan hangs/fails | Max concurrency of 3, exponential backoff (already in LLMClient), chunk-level retry |
-| GitHub API rate limits (remote repos) | Can't fetch files | Batch tree fetches, cache aggressively, local clone fallback |
+| GitHub API rate limits (remote repos) | Can't fetch files | **Primary: shallow clone** (1 git operation). Fallback: API with `x-ratelimit-remaining` backpressure |
 | False positives in large codebase | Noisy report | Validation pass + confidence scoring (reuse existing), domain-specific prompt tuning |
-| Single file too large for context | Missed coverage | Truncation with heuristic extraction of security-relevant sections |
+| Single file too large for context | Missed coverage | Head+tail truncation (imports/declarations + exports/main logic) |
 
 ---
 
