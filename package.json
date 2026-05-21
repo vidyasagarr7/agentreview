@@ -1,6 +1,6 @@
 {
   "name": "agentreview",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Multi-perspective automated PR review CLI using parallel AI agents",
   "bin": {
     "agentreview": "./dist/cli/index.js"
