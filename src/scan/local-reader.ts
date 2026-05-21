@@ -117,10 +117,12 @@ export class LocalSourceReader implements SourceReader {
       return null; // outside root
     }
 
-    // lstat check — must be a regular file
+    // Use resolved real path for all subsequent operations to prevent TOCTOU race.
+    // If an attacker swaps a symlink between realpath check and read, we still
+    // read from the validated path, not the potentially-swapped original.
     let stat: fs.Stats;
     try {
-      stat = fs.lstatSync(resolved);
+      stat = fs.statSync(real);
     } catch {
       return null;
     }
@@ -135,7 +137,7 @@ export class LocalSourceReader implements SourceReader {
     }
 
     try {
-      return fs.readFileSync(resolved, 'utf-8');
+      return fs.readFileSync(real, 'utf-8');
     } catch {
       return null;
     }

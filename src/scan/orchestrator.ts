@@ -185,8 +185,11 @@ export async function scanCodebase(
   const effectiveReader: SourceReader = options.redact ? new RedactingReader(reader) : reader;
 
   try {
-    // b. Discover files
-    const classifiedFiles = await discoverFiles(effectiveReader, options.focus);
+    // b. Discover files (respect maxFiles limit)
+    let classifiedFiles = await discoverFiles(effectiveReader, options.focus);
+    if (options.maxFiles && classifiedFiles.length > options.maxFiles) {
+      classifiedFiles = classifiedFiles.slice(0, options.maxFiles);
+    }
 
     // c. Chunk files (redaction is handled by the reader wrapper)
     const chunks = await chunkFiles(classifiedFiles, effectiveReader, {

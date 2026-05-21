@@ -160,10 +160,10 @@ describe('scanCodebase integration (vulnerable-app fixture)', () => {
     expect(onProgress).toHaveBeenCalled();
     // Should have both 'started' and 'completed' events
     const startedCalls = onProgress.mock.calls.filter(
-      ([, status]: [string, string]) => status === 'started',
+      (args: unknown[]) => args[1] === 'started',
     );
     const completedCalls = onProgress.mock.calls.filter(
-      ([, status]: [string, string]) => status === 'completed',
+      (args: unknown[]) => args[1] === 'completed',
     );
     expect(startedCalls.length).toBeGreaterThan(0);
     expect(completedCalls.length).toBeGreaterThan(0);

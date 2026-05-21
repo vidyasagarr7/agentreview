@@ -48,6 +48,7 @@ export interface ScanOptions {
   focus?: SecurityDomain[];
   maxConcurrency: number;
   budgetTokens: number;
+  maxFiles?: number;
   model?: string;
   timeout: number;
   validate: boolean;

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import { writeFile, mkdir } from 'fs/promises';
+import { GitHubClient } from '../../github/client.js';
 import { dirname } from 'path';
 import { ConfigManager } from '../config.js';
 import { checkScanDisclosure } from '../disclosure.js';
@@ -107,19 +108,21 @@ async function runScan(target: string, opts: {
     llmConfig = { ...llmConfig, timeout: opts.timeout };
   }
 
-  // ── Issue flag ────────────────────────────────────────────────────────────
-  if (opts.issue) {
-    console.error('⚠️  --issue is not yet implemented. Report will be written to stdout/file only.');
-  }
 
   // ── Disclosure ────────────────────────────────────────────────────────────
-  // Quick file listing for disclosure count (lightweight pre-scan)
-  const { LocalSourceReader } = await import('../../scan/local-reader.js');
-  const preReader = new LocalSourceReader(target);
-  const files = await preReader.listFiles();
+  // Quick file listing for disclosure count (local targets only)
+  let preFileCount = 0;
+  if (!target.includes('github.com')) {
+    try {
+      const { LocalSourceReader } = await import('../../scan/local-reader.js');
+      const preReader = new LocalSourceReader(target);
+      const files = await preReader.listFiles();
+      preFileCount = files.length;
+    } catch { /* target may not exist yet for remote */ }
+  }
   const acknowledged = config.hasAcknowledgedDataPolicy();
   await checkScanDisclosure(acknowledged, opts.yes, {
-    fileCount: files.length,
+    fileCount: preFileCount,
     provider: llmConfig.provider,
     model: llmConfig.model,
     focus: focus,
@@ -132,6 +135,7 @@ async function runScan(target: string, opts: {
     focus,
     maxConcurrency: 3,
     budgetTokens: opts.budget,
+    maxFiles: opts.maxFiles,
     model: opts.model,
     timeout: llmConfig.timeout,
     validate: true,
@@ -175,6 +179,26 @@ async function runScan(target: string, opts: {
     console.error(`✅ Report written to: ${opts.output}`);
   } else {
     process.stdout.write(rendered + '\n');
+  }
+
+  // ── Post as GitHub Issue ─────────────────────────────────────────────────
+  if (opts.issue && target.includes('github.com')) {
+    const issueSpinner = ora('Creating GitHub issue…').start();
+    try {
+      const { parseGitHubUrl } = await import('../../scan/clone.js');
+      const { owner, repo } = parseGitHubUrl(target);
+      const githubToken = config.getGitHubToken();
+      const ghClient = new GitHubClient(githubToken);
+      const severityLabel = result.stats.bySeverity.CRITICAL > 0 ? 'critical' : result.stats.bySeverity.HIGH > 0 ? 'high' : 'security';
+      const issueBody = rendered.length > 65000 ? rendered.slice(0, 65000) + '\n\n*[truncated — full report exceeded GitHub limit]*' : rendered;
+      const issue = await ghClient.createIssue(owner, repo, `🔒 Security Scan: ${result.findings.length} finding(s)`, issueBody, ['security', severityLabel]);
+      issueSpinner.succeed(`Issue created: ${issue.url}`);
+    } catch (err) {
+      issueSpinner.fail('Failed to create issue');
+      console.error(`⚠️  ${(err as Error).message}`);
+    }
+  } else if (opts.issue) {
+    console.error('⚠️  --issue requires a GitHub URL target.');
   }
 
   // ── Summary ───────────────────────────────────────────────────────────────

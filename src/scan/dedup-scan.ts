@@ -138,7 +138,6 @@ export function dedupScanFindings(chunkResults: ChunkResult[]): AgentFinding[] {
         // Check they come from different domains (via lenses)
         const domainsA = new Set(a.lenses);
         const domainsB = new Set(b.lenses);
-        const sharedDomains = [...domainsA].some((d) => domainsB.has(d));
 
         // Only cross-domain merge if they don't fully share all domains
         const allSame = domainsA.size === domainsB.size && [...domainsA].every((d) => domainsB.has(d));
