@@ -417,9 +417,17 @@ Create at: https://github.com/settings/tokens
 | `security` | Security | OWASP Top 10, auth, injection, secrets, crypto, data exposure |
 | `architecture` | Architecture | Design patterns, coupling, API contracts, scalability |
 | `quality` | Code Quality | Error handling, tests, docs, naming, complexity |
+| `hipaa` | HIPAA Compliance | PHI exposure, encryption, audit logging, de-identification, FHIR/HL7 |
+| `soc2` | SOC 2 Compliance | Trust Service Criteria — security, availability, integrity, confidentiality, privacy |
 
 ```bash
 agentreview lenses list    # List all available lenses
+
+# Healthcare codebase review
+agentreview https://github.com/org/healthcare-app/pull/42 --lenses hipaa,security
+
+# SOC 2 audit
+agentreview scan ./my-saas --focus auth,secrets --lenses soc2
 ```
 
 ## Custom Lenses

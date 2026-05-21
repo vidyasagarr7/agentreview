@@ -4,8 +4,10 @@ import type { Lens } from '../types/index.js';
 import { securityLens } from './builtin/security.js';
 import { architectureLens } from './builtin/architecture.js';
 import { qualityLens } from './builtin/quality.js';
+import { hipaaLens } from './builtin/hipaa.js';
+import { soc2Lens } from './builtin/soc2.js';
 
-const BUILTIN_LENSES: Lens[] = [securityLens, architectureLens, qualityLens];
+const BUILTIN_LENSES: Lens[] = [securityLens, architectureLens, qualityLens, hipaaLens, soc2Lens];
 const MAX_PROMPT_BYTES = 10 * 1024; // 10KB
 
 /**
