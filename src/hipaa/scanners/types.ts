@@ -1,25 +1,22 @@
-import type { AgentFinding } from '../../types/index.js';
+import type { AgentFinding, FindingSeverity } from '../../types/index.js';
 
 export interface ScannerOptions {
-  /** PHI field names to check for */
   phiFields: Set<string>;
-  /** Only run on files matching these patterns (empty = all files) */
   phiSourcePatterns?: string[];
-  /** Skip test files */
   skipTests?: boolean;
 }
 
 export interface Scanner {
   id: string;
   name: string;
-  /** Run deterministic scan on file contents. Returns findings with deterministic: true */
   scan(files: Map<string, string>, options: ScannerOptions): AgentFinding[];
 }
 
-/** Helper to create a deterministic finding */
+let counter = 0;
+
 export function createDeterministicFinding(opts: {
   scannerId: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  severity: FindingSeverity;
   category: string;
   location: string;
   summary: string;
@@ -28,7 +25,7 @@ export function createDeterministicFinding(opts: {
   regulation: string;
 }): AgentFinding {
   return {
-    id: `${opts.scannerId}-${Date.now().toString(36)}`,
+    id: `${opts.scannerId}-${(++counter).toString().padStart(3, '0')}`,
     severity: opts.severity,
     category: opts.category,
     location: opts.location,
@@ -42,3 +39,5 @@ export function createDeterministicFinding(opts: {
     regulation: opts.regulation,
   };
 }
+
+export function resetCounter(): void { counter = 0; }

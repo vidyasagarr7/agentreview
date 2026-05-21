@@ -73,9 +73,6 @@ export interface AgentFinding {
   scannerId?: string;
   regulation?: string;
   deterministic?: boolean;
-  scannerId?: string;
-  regulation?: string;
-  deterministic?: boolean;
 }
 
 export interface ParseError {
