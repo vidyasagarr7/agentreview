@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **HIPAA BAA Registry + PHI taint detection** — New `hipaa` section in `.agentreview.yml` for configuring Business Associate Agreement (BAA) tracking and PHI field detection. Includes built-in registry of well-known BAA-capable services (AWS, Azure, GCP, Twilio, Salesforce, Redox, 1upHealth) and services without BAA (OpenAI, Anthropic, Datadog, Sentry, Mixpanel, etc.). User overrides merge with defaults. PHI field detection covers HIPAA Safe Harbor 18 identifiers + FHIR resources + healthcare-specific fields with extensibility via `phi-fields`. BAA context is automatically injected into HIPAA lens prompts and relevant scan domains.
+
 - **HIPAA Compliance lens** (`hipaa`) — Built-in lens for reviewing healthcare applications handling Protected Health Information (PHI). Covers HIPAA Privacy Rule (45 CFR §164.500-534), Security Rule (45 CFR §164.302-318), and HITECH Act. Flags PHI exposure in logs/URLs/client-side, missing de-identification, unencrypted PHI, Minimum Necessary violations, missing audit logging, FHIR/HL7 data handling issues, and PHI sent to third-party APIs without BAA considerations.
 
 - **SOC 2 Compliance lens** (`soc2`) — Built-in lens for reviewing against AICPA Trust Service Criteria. Covers all five criteria: Security (CC6.1-CC6.8), Availability (A1.1-A1.3), Processing Integrity (PI1.1-PI1.5), Confidentiality (C1.1-C1.2), and Privacy (P1.1-P8.1). Flags hardcoded secrets, missing auth, encryption gaps, health check omissions, data validation issues, PII handling, and more.

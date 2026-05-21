@@ -401,6 +401,50 @@ scan:
 
 All fields are optional. Unknown keys produce a warning but are otherwise ignored.
 
+### HIPAA Configuration
+
+For healthcare codebases, configure BAA (Business Associate Agreement) tracking and PHI field detection:
+
+```yaml
+# .agentreview.yml
+hipaa:
+  # Domains/patterns with signed BAA
+  baa-covered:
+    - "*.amazonaws.com"
+    - "api.redoxengine.com"
+    - "internal-api.ourcompany.com"
+
+  # Domains/patterns explicitly without BAA
+  no-baa:
+    - "api.openai.com"
+    - "*.sentry.io"
+
+  # File patterns that handle PHI (extra scrutiny)
+  phi-sources:
+    - "src/services/patient/**"
+    - "src/fhir/**"
+
+  # Additional field names to treat as PHI beyond built-in defaults
+  phi-fields:
+    - "chartId"
+    - "encounterDate"
+    - "providerNpi"
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `hipaa.baa-covered` | `string[]` | Domains/glob patterns with signed BAA (merged with built-in defaults like AWS, Azure, GCP) |
+| `hipaa.no-baa` | `string[]` | Domains/glob patterns explicitly without BAA (merged with built-in defaults like OpenAI, Sentry) |
+| `hipaa.phi-sources` | `string[]` | File glob patterns that handle PHI — these get extra scrutiny |
+| `hipaa.phi-fields` | `string[]` | Additional field names to treat as PHI beyond the built-in HIPAA Safe Harbor 18 identifiers |
+
+When `hipaa` config is present and the `hipaa` lens is active, AgentReview injects BAA registry context into the review prompt. The HIPAA lens will:
+- Flag PHI sent to endpoints without BAA as **HIGH** or **CRITICAL**
+- Flag PHI sent to endpoints with unknown BAA status as **MEDIUM**
+- Accept PHI sent to BAA-covered endpoints (if properly encrypted in transit)
+
+Built-in BAA-covered services include AWS, Azure, GCP, Twilio, Salesforce, Redox, and 1upHealth. Built-in no-BAA services include OpenAI, Anthropic, Datadog, Sentry, Mixpanel, Segment, and others. User overrides take precedence — adding a domain to `baa-covered` removes it from the no-BAA list and vice versa.
+
 ### GitHub Token Scopes
 
 | Repo type | Required scope |

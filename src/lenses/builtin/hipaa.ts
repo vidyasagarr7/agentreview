@@ -1,4 +1,7 @@
 import type { Lens } from '../../types/index.js';
+import type { HipaaConfig } from '../../config/repo-config.js';
+import { buildBaaRegistry } from '../../hipaa/baa-registry.js';
+import { buildPhiFieldSet, DEFAULT_PHI_FIELDS } from '../../hipaa/phi-patterns.js';
 
 export const hipaaLens: Lens = {
   id: 'hipaa',
@@ -114,3 +117,58 @@ If you find NO HIPAA compliance issues, return exactly: []
 
 Do not return findings about general security issues (SQL injection, XSS) unless they directly involve PHI exposure. Do not flag general code quality or architecture issues.`,
 };
+
+/**
+ * Build a HIPAA context block to append to the HIPAA lens prompt.
+ * Includes BAA registry information and PHI field names.
+ */
+export function buildHipaaContext(config?: HipaaConfig): string {
+  const registry = buildBaaRegistry(config);
+  const phiFields = buildPhiFieldSet(config);
+
+  // Only include user-defined fields (beyond defaults) in the custom section
+  const customPhiFields = config?.phiFields?.filter((f) => !DEFAULT_PHI_FIELDS.includes(f)) ?? [];
+
+  const lines: string[] = [];
+
+  lines.push('## BAA Registry');
+  lines.push('');
+  lines.push('The following endpoints/domains have signed Business Associate Agreements (BAA):');
+  for (const domain of registry.covered) {
+    lines.push(`- ${domain}`);
+  }
+
+  lines.push('');
+  lines.push('The following endpoints/domains do NOT have BAAs — PHI MUST NOT be transmitted to these:');
+  for (const domain of registry.noBaa) {
+    lines.push(`- ${domain}`);
+  }
+
+  lines.push('');
+  lines.push('**Rules:**');
+  lines.push('- Flag any PHI transmission to endpoints without BAA (listed above or not in the registry at all) as HIGH or CRITICAL.');
+  lines.push('- Endpoints not in either list should be flagged as "unknown BAA status" at MEDIUM severity.');
+  lines.push('- PHI sent to BAA-covered endpoints is acceptable if properly encrypted in transit.');
+
+  if (customPhiFields.length > 0) {
+    lines.push('');
+    lines.push('## Project-Specific PHI Fields');
+    lines.push('');
+    lines.push('In addition to standard PHI patterns, watch for these project-specific field names:');
+    for (const field of customPhiFields) {
+      lines.push(`- \`${field}\``);
+    }
+  }
+
+  if (config?.phiSources && config.phiSources.length > 0) {
+    lines.push('');
+    lines.push('## PHI Source Files');
+    lines.push('');
+    lines.push('The following file patterns are known to handle PHI — apply extra scrutiny:');
+    for (const pattern of config.phiSources) {
+      lines.push(`- \`${pattern}\``);
+    }
+  }
+
+  return lines.join('\n');
+}

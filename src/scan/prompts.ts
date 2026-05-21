@@ -598,6 +598,7 @@ Return ONLY a JSON array — no other text.`,
 export function buildScanPrompt(
   chunk: ScanChunk,
   meta: { target: string; branch: string },
+  options?: { hipaaContext?: string },
 ): { system: string; user: string } {
   const system = domainPrompts[chunk.domain];
 
@@ -631,7 +632,10 @@ ${fileBlocks}
 
 ---
 
-Analyze these files for ${chunk.domain} security issues. Return your findings as a JSON array.`;
+Analyze these files for ${chunk.domain} security issues. Return your findings as a JSON array.${options?.hipaaContext && (chunk.domain === 'auth' || chunk.domain === 'data-flow' || chunk.domain === 'general') ? `
+
+## HIPAA Configuration Context
+${options.hipaaContext}` : ''}`;
 
   return { system, user };
 }

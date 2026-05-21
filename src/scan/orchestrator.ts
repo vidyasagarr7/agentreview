@@ -23,6 +23,8 @@ import { buildScanPrompt } from './prompts.js';
 import { dedupScanFindings } from './dedup-scan.js';
 import { loadBaseline, saveBaseline, filterNewFindings, createBaseline } from './baseline.js';
 import { redactSecrets } from './redact.js';
+import { loadRepoConfig } from '../config/repo-config.js';
+import { buildHipaaContext } from '../lenses/builtin/hipaa.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ async function dispatchChunk(
   llm: LLMClient,
   meta: { target: string; branch: string },
   onProgress?: ScanProgressCallback,
+  hipaaContext?: string,
 ): Promise<ChunkResult> {
   const start = Date.now();
 
@@ -61,7 +64,7 @@ async function dispatchChunk(
   });
 
   try {
-    const { system, user } = buildScanPrompt(chunk, meta);
+    const { system, user } = buildScanPrompt(chunk, meta, { hipaaContext });
     const response = await llm.complete(system, user, undefined, { maxTokens: 8192 });
     const parsed = parseFindings(response, chunk.id);
 
@@ -210,9 +213,22 @@ export async function scanCodebase(
     const limit = pLimit(options.maxConcurrency || 3);
     const meta = { target, branch };
 
+    // Load repo config for HIPAA context in scan
+    let hipaaContext: string | undefined;
+    if (!isGitHub) {
+      try {
+        const repoConfig = await loadRepoConfig(target);
+        if (repoConfig?.hipaa) {
+          hipaaContext = buildHipaaContext(repoConfig.hipaa);
+        }
+      } catch {
+        // Ignore — HIPAA context is optional
+      }
+    }
+
     const chunkResults = await Promise.all(
       chunks.map((chunk) =>
-        limit(() => dispatchChunk(chunk, llm, meta, options.onProgress)),
+        limit(() => dispatchChunk(chunk, llm, meta, options.onProgress, hipaaContext)),
       ),
     );
 
