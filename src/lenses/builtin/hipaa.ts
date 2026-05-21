@@ -129,19 +129,23 @@ export function buildHipaaContext(config?: HipaaConfig): string {
   // Only include user-defined fields (beyond defaults) in the custom section
   const customPhiFields = config?.phiFields?.filter((f) => !DEFAULT_PHI_FIELDS.includes(f)) ?? [];
 
+  // Escape special characters in domain strings to prevent prompt injection
+  const escapeDomain = (d: string): string =>
+    d.replace(/[\r\n\t`${}]/g, '').replace(/\s+/g, ' ').trim();
+
   const lines: string[] = [];
 
   lines.push('## BAA Registry');
   lines.push('');
   lines.push('The following endpoints/domains have signed Business Associate Agreements (BAA):');
   for (const domain of registry.covered) {
-    lines.push(`- ${domain}`);
+    lines.push(`- ${escapeDomain(domain)}`);
   }
 
   lines.push('');
   lines.push('The following endpoints/domains do NOT have BAAs — PHI MUST NOT be transmitted to these:');
   for (const domain of registry.noBaa) {
-    lines.push(`- ${domain}`);
+    lines.push(`- ${escapeDomain(domain)}`);
   }
 
   lines.push('');

@@ -8,40 +8,53 @@ export interface BaaRegistry {
 }
 
 // ─── Default Well-Known BAA-Capable Services ──────────────────────────────────
+// Default BAA-covered services (verified as of 2024-2026).
+// Organizations should customize via .agentreview.yml hipaa.baa-covered.
+// Having a BAA available does NOT mean it's signed — always verify with your compliance team.
 
 export const DEFAULT_BAA_COVERED = [
-  '*.amazonaws.com',      // AWS (BAA available)
-  '*.azure.com',          // Azure (BAA available)
+  '*.amazonaws.com',           // AWS (BAA available)
+  '*.azure.com',               // Azure (BAA available)
   '*.azure-api.net',
-  '*.google.com',         // GCP (BAA available)
+  '*.google.com',              // GCP (BAA available)
   '*.googleapis.com',
-  '*.twilio.com',         // Twilio (BAA available)
-  '*.salesforce.com',     // Salesforce (BAA available)
-  '*.redoxengine.com',    // Redox (healthcare middleware, BAA standard)
-  '*.1up.health',         // 1upHealth (BAA available)
+  '*.twilio.com',              // Twilio (BAA available)
+  '*.salesforce.com',          // Salesforce (BAA available)
+  '*.redoxengine.com',         // Redox (healthcare middleware, BAA standard)
+  '*.1up.health',              // 1upHealth (BAA available)
+  '*.snowflakecomputing.com',  // Snowflake (BAA available)
+  '*.databricks.com',          // Databricks (BAA available for healthcare)
+  '*.supabase.co',             // Supabase (BAA available)
+  '*.mongodb.net',             // MongoDB Atlas (BAA available)
+  '*.openai.com',              // OpenAI (BAA available since 2024 via API enterprise)
+  '*.anthropic.com',           // Anthropic (BAA available since 2024)
 ];
 
 // ─── Default Well-Known Services Without BAA ──────────────────────────────────
 
 export const DEFAULT_NO_BAA = [
-  'api.openai.com',        // OpenAI (no BAA as of 2026)
-  '*.anthropic.com',       // Anthropic (no BAA)
-  '*.datadog.com',         // Datadog (no BAA for PHI)
   '*.sentry.io',           // Sentry (no BAA)
   '*.logrocket.com',       // LogRocket (no BAA)
   '*.mixpanel.com',        // Mixpanel (no BAA)
-  '*.segment.com',         // Segment (limited BAA)
   '*.hotjar.com',          // Hotjar (no BAA)
   '*.intercom.io',         // Intercom (no BAA)
-  '*.slack.com',           // Slack (no BAA for PHI)
 ];
+
+// ─── Domain Sanitization ──────────────────────────────────────────────────────
+
+/**
+ * Sanitize a domain string to prevent prompt injection and normalize input.
+ * Strips newlines, control characters, and excessive whitespace.
+ */
+function sanitizeDomain(domain: string): string {
+  return domain.replace(/[\r\n\t]/g, '').replace(/\s+/g, ' ').trim().slice(0, 253);
+}
 
 // ─── Glob Pattern Matching ────────────────────────────────────────────────────
 
 /**
- * Match a hostname against a glob-style pattern.
- * Supports leading `*.` wildcard (matches any subdomain).
- * Exact match otherwise.
+ * Simple prefix glob matching. Supports `*.example.com` patterns only.
+ * Does NOT support complex globs like `s3.*.amazonaws.com` or `**` patterns.
  */
 function matchesPattern(hostname: string, pattern: string): boolean {
   const lowerHost = hostname.toLowerCase();
@@ -83,8 +96,8 @@ export function buildBaaRegistry(config?: HipaaConfig): BaaRegistry {
   }
 
   return {
-    covered: [...coveredSet],
-    noBaa: [...noBaaSet],
+    covered: [...coveredSet].map(sanitizeDomain).filter(Boolean),
+    noBaa: [...noBaaSet].map(sanitizeDomain).filter(Boolean),
   };
 }
 
@@ -94,31 +107,38 @@ export function buildBaaRegistry(config?: HipaaConfig): BaaRegistry {
  * Classify a URL or hostname against the BAA registry.
  * Returns 'covered', 'no-baa', or 'unknown'.
  */
+/**
+ * Classify a URL or hostname against the BAA registry.
+ * Returns 'covered', 'no-baa', or 'unknown'.
+ *
+ * noBaa is checked FIRST (fail-closed): if a domain appears in both lists,
+ * it is treated as no-baa for HIPAA safety. Unknown domains also remain
+ * 'unknown' so they can be flagged for manual BAA verification.
+ */
 export function classifyEndpoint(urlOrHostname: string, registry: BaaRegistry): 'covered' | 'no-baa' | 'unknown' {
-  let hostname: string;
+  const hostname = extractHostname(urlOrHostname);
+  if (!hostname) return 'unknown';
 
-  try {
-    // Try parsing as URL first
-    const url = new URL(urlOrHostname.includes('://') ? urlOrHostname : `https://${urlOrHostname}`);
-    hostname = url.hostname;
-  } catch {
-    // Fall back to treating it as a raw hostname
-    hostname = urlOrHostname;
+  // Check no-BAA first (fail-closed for HIPAA safety)
+  if (registry.noBaa.some(pattern => matchesPattern(hostname, pattern))) {
+    return 'no-baa';
   }
-
-  // Check covered first (more specific)
-  for (const pattern of registry.covered) {
-    if (matchesPattern(hostname, pattern)) {
-      return 'covered';
-    }
+  if (registry.covered.some(pattern => matchesPattern(hostname, pattern))) {
+    return 'covered';
   }
-
-  // Check no-baa
-  for (const pattern of registry.noBaa) {
-    if (matchesPattern(hostname, pattern)) {
-      return 'no-baa';
-    }
-  }
-
   return 'unknown';
+}
+
+/**
+ * Extract a hostname from a URL string or raw hostname.
+ * Returns null for malformed inputs.
+ */
+function extractHostname(urlOrHostname: string): string | null {
+  if (!urlOrHostname || typeof urlOrHostname !== 'string') return null;
+  try {
+    const url = new URL(urlOrHostname.includes('://') ? urlOrHostname : `https://${urlOrHostname}`);
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
 }

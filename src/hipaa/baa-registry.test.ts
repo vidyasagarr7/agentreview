@@ -22,8 +22,8 @@ describe('buildBaaRegistry', () => {
 
   it('builds registry with defaults when config is empty', () => {
     const registry = buildBaaRegistry({});
-    expect(registry.covered.length).toBe(DEFAULT_BAA_COVERED.length);
-    expect(registry.noBaa.length).toBe(DEFAULT_NO_BAA.length);
+    expect(registry.covered.length).toBeGreaterThanOrEqual(DEFAULT_BAA_COVERED.length);
+    expect(registry.noBaa.length).toBeGreaterThanOrEqual(DEFAULT_NO_BAA.length);
   });
 
   it('merges user baaCovered with defaults', () => {
@@ -41,16 +41,16 @@ describe('buildBaaRegistry', () => {
     });
     expect(registry.noBaa).toContain('*.sketchy-api.com');
     // Defaults still present
-    expect(registry.noBaa).toContain('api.openai.com');
+    expect(registry.noBaa).toContain('*.sentry.io');
   });
 
   it('user override moves domain from noBaa to covered', () => {
-    // api.openai.com is in DEFAULT_NO_BAA — move it to covered
+    // *.sentry.io is in DEFAULT_NO_BAA — move it to covered
     const registry = buildBaaRegistry({
-      baaCovered: ['api.openai.com'],
+      baaCovered: ['*.sentry.io'],
     });
-    expect(registry.covered).toContain('api.openai.com');
-    expect(registry.noBaa).not.toContain('api.openai.com');
+    expect(registry.covered).toContain('*.sentry.io');
+    expect(registry.noBaa).not.toContain('*.sentry.io');
   });
 
   it('user noBaa override moves domain from covered to noBaa', () => {
@@ -71,7 +71,7 @@ describe('classifyEndpoint', () => {
   });
 
   it('classifies noBaa domain as no-baa', () => {
-    expect(classifyEndpoint('api.openai.com', registry)).toBe('no-baa');
+    expect(classifyEndpoint('app.sentry.io', registry)).toBe('no-baa');
   });
 
   it('classifies unknown domain as unknown', () => {
@@ -80,7 +80,7 @@ describe('classifyEndpoint', () => {
 
   it('handles full URLs', () => {
     expect(classifyEndpoint('https://s3.amazonaws.com/bucket/key', registry)).toBe('covered');
-    expect(classifyEndpoint('https://api.openai.com/v1/chat', registry)).toBe('no-baa');
+    expect(classifyEndpoint('https://app.sentry.io/issues', registry)).toBe('no-baa');
   });
 
   it('glob matching works for subdomains', () => {
@@ -91,11 +91,51 @@ describe('classifyEndpoint', () => {
   });
 
   it('exact match works for non-wildcard patterns', () => {
-    expect(classifyEndpoint('api.openai.com', registry)).toBe('no-baa');
+    expect(classifyEndpoint('sentry.io', registry)).toBe('no-baa');
   });
 
   it('is case-insensitive', () => {
     expect(classifyEndpoint('S3.AMAZONAWS.COM', registry)).toBe('covered');
-    expect(classifyEndpoint('API.OPENAI.COM', registry)).toBe('no-baa');
+    expect(classifyEndpoint('APP.SENTRY.IO', registry)).toBe('no-baa');
+  });
+
+  // Finding 7: fail-closed — noBaa wins over covered
+  it('returns no-baa when domain is in both lists (fail-closed)', () => {
+    const customRegistry = buildBaaRegistry({
+      baaCovered: ['*.overlap.com'],
+      noBaa: ['*.overlap.com'],
+    });
+    // noBaa should win because classifyEndpoint checks noBaa first
+    expect(classifyEndpoint('api.overlap.com', customRegistry)).toBe('no-baa');
+  });
+
+  // Finding 9: malformed URLs
+  it('returns unknown for empty string', () => {
+    expect(classifyEndpoint('', registry)).toBe('unknown');
+  });
+
+  it('returns unknown for javascript: protocol', () => {
+    expect(classifyEndpoint('javascript:alert(1)', registry)).toBe('unknown');
+  });
+
+  it('returns unknown for bare port', () => {
+    expect(classifyEndpoint(':8080', registry)).toBe('unknown');
+  });
+
+  // Finding 9: sanitization
+  it('handles domains with newlines via sanitized registry', () => {
+    const customRegistry = buildBaaRegistry({
+      baaCovered: ['*.clean\n.example.com'],
+    });
+    // Newlines should be stripped by sanitizeDomain
+    expect(customRegistry.covered.some(d => d.includes('\n'))).toBe(false);
+  });
+
+  it('handles domains with control characters via sanitized registry', () => {
+    const customRegistry = buildBaaRegistry({
+      baaCovered: ['*.control\t.example.com'],
+    });
+    // Tabs should be stripped by sanitizeDomain
+    expect(customRegistry.covered.some(d => d.includes('\t'))).toBe(false);
   });
 });

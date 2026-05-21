@@ -175,12 +175,15 @@ export async function scanCodebase(
 
   let reader: SourceReader;
   let cleanupFn: (() => Promise<void>) | undefined;
+  let clonedRepoRoot: string | undefined;
 
   // a. Resolve source
   if (isGitHub) {
     const result = await cloneRepo(target, { token: config.token, branch: config.branch });
     reader = result.reader;
     cleanupFn = result.cleanup;
+    // LocalSourceReader exposes rootReal for config loading
+    clonedRepoRoot = result.reader.rootReal;
   } else {
     reader = new LocalSourceReader(target);
   }
@@ -213,11 +216,12 @@ export async function scanCodebase(
     const limit = pLimit(options.maxConcurrency || 3);
     const meta = { target, branch };
 
-    // Load repo config for HIPAA context in scan
+    // Load repo config for HIPAA context in scan (works for both local and cloned repos)
     let hipaaContext: string | undefined;
-    if (!isGitHub) {
+    const configRoot = isGitHub ? clonedRepoRoot : target;
+    if (configRoot) {
       try {
-        const repoConfig = await loadRepoConfig(target);
+        const repoConfig = await loadRepoConfig(configRoot);
         if (repoConfig?.hipaa) {
           hipaaContext = buildHipaaContext(repoConfig.hipaa);
         }

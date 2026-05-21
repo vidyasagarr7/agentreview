@@ -6,7 +6,7 @@ describe('buildHipaaContext', () => {
     const context = buildHipaaContext();
     expect(context).toContain('## BAA Registry');
     expect(context).toContain('*.amazonaws.com');
-    expect(context).toContain('api.openai.com');
+    expect(context).toContain('*.sentry.io');
     expect(context).toContain('MUST NOT be transmitted');
   });
 

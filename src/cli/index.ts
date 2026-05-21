@@ -186,6 +186,12 @@ async function reviewPR(prUrl: string, opts: {
       process.exit(1);
     }
 
+    // Build HIPAA context for ensemble mode if applicable
+    let ensembleHipaaContext: string | undefined;
+    if (opts.repoConfig?.hipaa && lenses.some((l) => l.id === 'hipaa')) {
+      ensembleHipaaContext = buildHipaaContext(opts.repoConfig.hipaa);
+    }
+
     const ensembleSpinner = ora(`Running ensemble review with ${ensembleModels.length} models: ${ensembleModels.map((m) => m.label).join(', ')}…`).start();
 
     const ensembleResult = await runEnsemble(
@@ -197,7 +203,7 @@ async function reviewPR(prUrl: string, opts: {
       },
       lenses,
       context,
-      { verbose: opts.verbose },
+      { verbose: opts.verbose, hipaaContext: ensembleHipaaContext },
     );
 
     ensembleSpinner.succeed(

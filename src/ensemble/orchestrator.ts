@@ -14,10 +14,11 @@ export async function runEnsembleReview(
   models: ModelConfig[],
   lenses: Lens[],
   context: ReviewContext,
-  options?: { verbose?: boolean; timeoutMs?: number },
+  options?: { verbose?: boolean; timeoutMs?: number; hipaaContext?: string },
 ): Promise<ModelReviewResult[]> {
   const verbose = options?.verbose ?? false;
   const timeoutMs = options?.timeoutMs ?? 120000;
+  const hipaaContext = options?.hipaaContext;
 
   const tasks = models.map(async (modelConfig): Promise<ModelReviewResult> => {
     const start = Date.now();
@@ -30,7 +31,7 @@ export async function runEnsembleReview(
     });
 
     const settled = await Promise.allSettled([
-      dispatchAgents(lenses, context, llmClient, { verbose, timeoutMs }),
+      dispatchAgents(lenses, context, llmClient, { verbose, timeoutMs, hipaaContext }),
     ]);
 
     const durationMs = Date.now() - start;
