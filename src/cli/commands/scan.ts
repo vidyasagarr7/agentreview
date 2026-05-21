@@ -137,11 +137,7 @@ async function runScan(target: string, opts: {
   // ── Run scan ──────────────────────────────────────────────────────────────
   const llm = new LLMClient(llmConfig);
 
-  const scanOptions: ScanOptions & {
-    baseline?: string;
-    updateBaseline?: boolean;
-    baselinePath?: string;
-  } = {
+  const scanOptions: ScanOptions & { baseline?: string; updateBaseline?: boolean; baselinePath?: string } = {
     focus,
     maxConcurrency: 3,
     budgetTokens: opts.budget,
@@ -177,13 +173,8 @@ async function runScan(target: string, opts: {
     }
   };
 
-  // Pass GitHub token for private repo cloning
-  let githubTokenForClone: string | undefined;
-  try { githubTokenForClone = config.getGitHubToken(); } catch { /* optional for scan */ }
-
   const result = await scanCodebase(target, scanOptions, llm, {
     branch: opts.branch,
-    token: githubTokenForClone,
   });
 
   scanSpinner.succeed(`Scan complete: ${result.filesScanned} files scanned`);
@@ -229,22 +220,9 @@ async function runScan(target: string, opts: {
   if (stats.bySeverity.LOW > 0) parts.push(`${stats.bySeverity.LOW} LOW`);
   if (stats.bySeverity.INFO > 0) parts.push(`${stats.bySeverity.INFO} INFO`);
 
-  const suppressedNote = result.suppressedCount
-    ? ` (${result.suppressedCount} suppressed by baseline)`
-    : '';
-
-  let summaryLine: string;
-  if (opts.baseline) {
-    summaryLine = `Baseline created with ${result.findings.length} finding(s)`;
-  } else if (opts.updateBaseline) {
-    summaryLine = `Baseline updated with ${result.findings.length} finding(s)`;
-  } else if (parts.length > 0) {
-    summaryLine = `Found ${stats.total} new finding(s): ${parts.join(', ')}${suppressedNote}`;
-  } else if (result.suppressedCount) {
-    summaryLine = `✅ No new findings${suppressedNote}`;
-  } else {
-    summaryLine = '✅ No findings — looks clean!';
-  }
+  const summaryLine = parts.length > 0
+    ? `Found ${stats.total} finding(s): ${parts.join(', ')}`
+    : '✅ No findings — looks clean!';
 
   console.error(`\n📋 ${summaryLine}`);
 
