@@ -7,4 +7,3 @@ coverage/
 *.tgz
 -e 
 # Action bundle (committed at release time)
-action/dist/
