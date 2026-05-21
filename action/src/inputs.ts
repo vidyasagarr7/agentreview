@@ -87,10 +87,10 @@ export function parseInputs(): ActionInputs {
 
   // --- Numeric ---
   const minConfidenceRaw = core.getInput('min-confidence');
-  const minConfidence = minConfidenceRaw ? parseFloat(minConfidenceRaw) : 0.5;
+  const minConfidence = minConfidenceRaw ? parseInt(minConfidenceRaw, 10) : 40;
 
   const codebaseBudgetRaw = core.getInput('codebase-budget');
-  const codebaseBudget = codebaseBudgetRaw ? parseInt(codebaseBudgetRaw, 10) : 30000;
+  const codebaseBudget = codebaseBudgetRaw ? parseInt(codebaseBudgetRaw, 10) : 8000;
 
   // --- custom-lenses-dir ---
   const customLensesDir = core.getInput('custom-lenses-dir') || undefined;
