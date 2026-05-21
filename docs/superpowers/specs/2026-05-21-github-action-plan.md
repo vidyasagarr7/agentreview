@@ -37,6 +37,9 @@
 - Lenses default: "all" → 'all'
 - fail-on validation: "HIGH" → valid, "INVALID" → throws
 - Boolean inputs parsed correctly (validate, verbose, codebase-context)
+- pr-number override parsed when present
+- comment-mode: full | summary | collapsed
+- Builds LLMConfig manually (provider, model, apiKey, timeout: 120, contextTokens: 128000)
 **Implementation:**
 - Use `@actions/core.getInput()` for all inputs
 - Return typed `ActionInputs` interface
@@ -49,7 +52,8 @@
 **Intent:** Extract PR metadata from GitHub Actions event context.
 **Tests:**
 - pull_request event → extracts owner, repo, prNumber, token
-- Non-PR event (push, schedule) → throws with clear message
+- Non-PR event with pr-number input → uses override
+- Non-PR event without pr-number → throws with clear message
 - pull_request_target event → works (for fork PRs)
 - Token from input overrides default github.token
 **Implementation:**
@@ -79,16 +83,20 @@
 
 ### Task 5: Post results (`action/src/post-results.ts`)
 **Files:** `action/src/post-results.ts`, `action/src/post-results.test.ts`
-**Intent:** Post review comment on PR, handle create-or-update.
+**Intent:** Post review comment on PR + write to step summary.
 **Tests:**
 - First run → creates new comment
 - Re-run (comment exists with marker) → updates existing comment
 - Comment includes marker `<!-- agentreview-action -->`
-- Large report (>65K) → truncated gracefully
+- Large report (>65K) → truncated gracefully with note
+- Step summary written via core.summary
+- comment-mode=summary → only posts finding counts + severity table
+- comment-mode=collapsed → wraps findings in <details> blocks
 **Implementation:**
 - Search existing comments for `<!-- agentreview-action -->` marker
 - If found → update; if not → create
-- Use `@actions/github` Octokit for direct API calls (or reuse GitHubClient)
+- Write full report to $GITHUB_STEP_SUMMARY via core.summary.addRaw()
+- Respect comment-mode for PR comment
 **Verification:** Tests pass
 
 ---
@@ -118,15 +126,16 @@
 
 ---
 
-### Task 8: ncc bundle + build script
-**Files:** `package.json` (scripts), `.github/workflows/build-action.yml` (optional)
-**Intent:** Bundle the action into a single file via ncc.
+### Task 8: tsup bundle + build script
+**Files:** `tsup.config.action.ts`, `package.json` (scripts)
+**Intent:** Bundle the action into a single CJS file via tsup.
 **Implementation:**
-- `npm install -D @vercel/ncc`
-- Add script: `"build:action": "ncc build action/src/index.ts -o action/dist --source-map --license licenses.txt"`
+- Create `tsup.config.action.ts` with format: ['cjs'], platform: 'node', target: 'node20', noExternal: [/.*/]
+- Add script: `"build:action": "tsup --config tsup.config.action.ts"`
+- Install `@actions/core` and `@actions/github` as dependencies
 - Build and commit `action/dist/index.js`
-- Verify bundle size < 10MB
-**Verification:** `npm run build:action` succeeds, `action/dist/index.js` exists
+- Verify bundle size < 50MB
+**Verification:** `npm run build:action` succeeds, `action/dist/index.js` exists, is CJS
 
 ---
 

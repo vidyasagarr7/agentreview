@@ -2,7 +2,8 @@
 
 **Date:** 2026-05-21
 **Author:** Vex
-**Status:** DRAFT — awaiting design review + human approval
+**Status:** REVISED — incorporates design review findings
+**Reviewer:** Subagent (DevOps/Actions expert) — SHIP WITH CHANGES
 
 ---
 
@@ -38,7 +39,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  issues: write
 
 jobs:
   review:
@@ -89,15 +89,35 @@ Using `node20` runtime (not Docker) for:
 ```
 action.yml                    # Action metadata + inputs/outputs
 action/
-  index.ts                    # Main entry point
-  inputs.ts                   # Parse and validate Action inputs
-  context.ts                  # Extract PR context from GitHub event
-  run.ts                      # Orchestrate the review pipeline
-  outputs.ts                  # Set Action outputs
-  post-results.ts             # Post review comment + set status check
+  src/
+    index.ts                  # Main entry point
+    inputs.ts                 # Parse and validate Action inputs
+    context.ts                # Extract PR context from GitHub event
+    run.ts                    # Orchestrate the review pipeline
+    outputs.ts                # Set Action outputs
+    post-results.ts           # Post review comment + set status check
 action/dist/
-  index.js                    # Bundled output (ncc compiled)
+  index.js                    # Bundled output (tsup CJS — NOT ncc, see below)
 ```
+
+### 4.3 Bundling: tsup (NOT ncc)
+
+**Design review finding:** The project uses tsup (esbuild-based). Adding ncc creates a two-bundler problem. Additionally, ncc has known issues with ESM-only packages (Anthropic/OpenAI SDKs).
+
+**Decision:** Use tsup for the action bundle too:
+```typescript
+// tsup.config.action.ts
+export default {
+  entry: ['action/src/index.ts'],
+  outDir: 'action/dist',
+  format: ['cjs'],  // GitHub Actions requires CJS
+  platform: 'node',
+  target: 'node20',
+  bundle: true,
+  noExternal: [/.*/],  // Inline everything
+}
+```
+This keeps one bundler, handles ESM deps correctly, and outputs CJS as Actions requires.
 
 ### 4.3 Data Flow
 
@@ -167,8 +187,10 @@ The existing code is already well-modularized:
 | `codebase-context` | No | `true` | Enable codebase awareness |
 | `codebase-budget` | No | `8000` | Token budget for codebase context |
 | `verbose` | No | `false` | Enable verbose logging |
-| `custom-lenses-dir` | No | | Path to custom lens JSON files |
+| `custom-lenses-dir` | No | | Path to custom lens JSON files (requires actions/checkout first) |
 | `github-token` | No | `${{ github.token }}` | GitHub token (auto-provided) |
+| `pr-number` | No | (from event) | Override PR number (for workflow_dispatch/issue_comment triggers) |
+| `comment-mode` | No | `full` | Comment mode: full, summary, or collapsed |
 
 ### 5.2 Action Outputs
 
@@ -178,7 +200,7 @@ The existing code is already well-modularized:
 | `critical-count` | Number of CRITICAL findings |
 | `high-count` | Number of HIGH findings |
 | `review-comment-id` | ID of the posted PR comment |
-| `report` | Full markdown report |
+| `report` | Full markdown report (truncated if >1MB; also written to $GITHUB_STEP_SUMMARY) |
 | `exit-code` | 0 (clean) or 2 (findings above fail-on threshold) |
 
 ### 5.3 Entry Point (`action/index.ts`)
@@ -253,12 +275,24 @@ Reuses existing modules directly:
 
 ### 5.7 Bundling
 
-Use `@vercel/ncc` to compile everything into a single `action/dist/index.js`:
+Use tsup to compile everything into a single CJS `action/dist/index.js`:
 ```bash
-npx ncc build action/index.ts -o action/dist --source-map --license licenses.txt
+npx tsup --config tsup.config.action.ts
 ```
 
-This single file is what GitHub Actions loads — no `node_modules` needed at runtime.
+This outputs CJS (required by Actions runtime), inlines all deps, and handles ESM packages correctly.
+
+**Additional results posting:**
+- Write full report to `$GITHUB_STEP_SUMMARY` (visible in Actions UI, no size limit)
+- Comment on PR (truncated to 65K chars if needed)
+- Set output `report` (truncated to 1MB if needed)
+
+**Concurrency guidance in README:**
+```yaml
+concurrency:
+  group: agentreview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+```
 
 ---
 
@@ -275,7 +309,8 @@ This single file is what GitHub Actions loads — no `node_modules` needed at ru
 | `validateAgentResults` | ✅ full | |
 | `consolidate` | ✅ full | |
 | `render` | ✅ full | |
-| `ConfigManager` | ❌ replaced | Action uses @actions/core for inputs, not env vars |
+| `ConfigManager` | ❌ replaced | Action builds `LLMConfig` manually from inputs (provider, model, apiKey, timeout, contextTokens) |
+| `checkDataDisclosure` | ❌ skipped | Action always runs non-interactively — disclosure is implicit by adding the action |
 
 **New code estimate:** ~300-500 lines across 6 files (action module) + action.yml + ncc build config.
 
@@ -302,7 +337,7 @@ This single file is what GitHub Actions loads — no `node_modules` needed at ru
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| ncc bundle too large (>50MB GitHub limit) | MEDIUM | Tree-shake, externalize unused deps. Current CLI is 180KB — should be fine |
+| tsup bundle too large (>50MB GitHub limit) | MEDIUM | Bundle will be 10-25MB (both LLM SDKs included). Under limit but monitor. Consider lazy dynamic imports for unused SDK in future |
 | Rate limiting on LLM API in parallel CI runs | MEDIUM | Action uses existing LLMClient retry logic |
 | GitHub token permissions insufficient | LOW | Document required permissions in README |
 | Sensitive code sent to LLM | MEDIUM | Document clearly in README. Consider future --redact support for Action |
