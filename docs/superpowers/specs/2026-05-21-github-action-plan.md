@@ -3,10 +3,24 @@
 **Date:** 2026-05-21
 **Spec:** `2026-05-21-github-action-design.md`
 **Branch:** `feat/github-action`
+**Revision:** v2 — incorporates design review + plan challenge findings
 
 ---
 
 ## Task Breakdown
+
+---
+
+### Task 0: Bundling spike — prove tsup CJS works (Finding 4: HIGH)
+**Files:** `action/src/spike.ts` (temporary)
+**Intent:** De-risk the entire plan by proving tsup can bundle ESM deps into CJS.
+**Implementation:**
+- Create minimal entry that imports: `@anthropic-ai/sdk`, `openai`, `p-limit`, `@octokit/rest`, `@actions/core`
+- Run: `npx tsup action/src/spike.ts --format cjs --platform node --target node20 --bundle --no-external '/.*/''`
+- Verify output is valid CJS, runs without error under `node --eval "require('./action/dist/spike.js')"`
+- Measure bundle size
+- Delete spike file after confirming
+**Verification:** CJS bundle loads without error. If this fails, fall back to ncc or subprocess approach.
 
 ---
 
@@ -39,7 +53,9 @@
 - Boolean inputs parsed correctly (validate, verbose, codebase-context)
 - pr-number override parsed when present
 - comment-mode: full | summary | collapsed
-- Builds LLMConfig manually (provider, model, apiKey, timeout: 120, contextTokens: 128000)
+- Builds LLMConfig with provider-aware context tokens (Anthropic: 200000, OpenAI: 128000) (Finding 5)
+- Model-provider validation: `gpt-*` with anthropic key → error (Finding 5)
+- custom-lenses-dir validates path exists on disk, throws helpful error if missing (Finding 6)
 **Implementation:**
 - Use `@actions/core.getInput()` for all inputs
 - Return typed `ActionInputs` interface
@@ -52,7 +68,7 @@
 **Intent:** Extract PR metadata from GitHub Actions event context.
 **Tests:**
 - pull_request event → extracts owner, repo, prNumber, token
-- Non-PR event with pr-number input → uses override
+- Non-PR event (workflow_dispatch/issue_comment) with pr-number input → constructs context from github.context.repo + pr-number override (Finding 7)
 - Non-PR event without pr-number → throws with clear message
 - pull_request_target event → works (for fork PRs)
 - Token from input overrides default github.token
@@ -73,6 +89,8 @@
 - Validation enabled/disabled works
 - fail-on threshold calculation correct
 - Error in one lens doesn't kill the whole review
+- Wires context.skippedFiles through to consolidate() (Finding 3)
+- noDedup intentionally excluded from Action inputs (defaults to false) (Finding 3)
 **Implementation:**
 - Import existing modules directly (not subprocess)
 - Build LLMConfig from action inputs
@@ -87,14 +105,15 @@
 **Tests:**
 - First run → creates new comment
 - Re-run (comment exists with marker) → updates existing comment
-- Comment includes marker `<!-- agentreview-action -->`
+- Uses existing `<!-- agentreview -->` marker (Finding 1: same marker as CLI to avoid duplicate comments)
 - Large report (>65K) → truncated gracefully with note
 - Step summary written via core.summary
 - comment-mode=summary → only posts finding counts + severity table
 - comment-mode=collapsed → wraps findings in <details> blocks
+- Returns comment ID for outputs (Finding 2)
 **Implementation:**
-- Search existing comments for `<!-- agentreview-action -->` marker
-- If found → update; if not → create
+- Extend `GitHubClient.postOrUpdateComment()` to return `{ commentId: number, created: boolean }` (Finding 2)
+- Use same `<!-- agentreview -->` marker as CLI (Finding 1: no parallel posting system)
 - Write full report to $GITHUB_STEP_SUMMARY via core.summary.addRaw()
 - Respect comment-mode for PR comment
 **Verification:** Tests pass
@@ -165,6 +184,7 @@
 
 ## Execution Order
 
+- **Group 0:** Task 0 (bundling spike — must pass before anything else)
 - **Group 1:** Tasks 1, 2, 3, 6 (action.yml + inputs + context + outputs — no dependencies)
 - **Group 2:** Tasks 4, 5 (pipeline + post-results — depend on inputs/context)
 - **Group 3:** Tasks 7, 8 (entry point + bundling — depend on everything)
