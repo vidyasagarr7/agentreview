@@ -20,6 +20,13 @@ export function extractPRContext(inputs: {
   if (eventName === 'pull_request' || eventName === 'pull_request_target') {
     prNumber = github.context.payload.pull_request?.number;
     core.debug(`Detected ${eventName} event, PR #${prNumber}`);
+    if (eventName === 'pull_request_target') {
+      core.warning(
+        '⚠️ Running under pull_request_target — this event has access to base repo secrets. ' +
+        'If this PR is from a fork, your API keys are being used to review untrusted code. ' +
+        'Consider using pull_request event instead for safer fork PR handling.'
+      );
+    }
   }
 
   // Allow input override for any event

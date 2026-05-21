@@ -24,6 +24,7 @@ vi.mock('@actions/core', () => {
       Object.keys(booleanInputs).forEach((k) => delete booleanInputs[k]);
       Object.assign(booleanInputs, vals);
     },
+    setSecret: vi.fn(),
   };
 });
 

@@ -15,6 +15,7 @@ vi.mock('@actions/github', () => ({
 // Mock @actions/core
 vi.mock('@actions/core', () => ({
   debug: vi.fn(),
+  warning: vi.fn(),
 }));
 
 import * as github from '@actions/github';

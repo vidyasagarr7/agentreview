@@ -71,7 +71,7 @@ export async function postResults(
   }
 
   // Always write full report to step summary
-  core.summary.addRaw(report).write();
+  await core.summary.addRaw(report).write();
 
   return { commentId, created };
 }

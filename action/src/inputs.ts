@@ -33,6 +33,9 @@ export function parseInputs(): ActionInputs {
   const provider: 'anthropic' | 'openai' = anthropicKey ? 'anthropic' : 'openai';
   const apiKey = anthropicKey || openaiKey;
 
+  // Mask API key in logs
+  core.setSecret(apiKey);
+
   // --- Model ---
   const model = core.getInput('model') || (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
 
@@ -87,10 +90,12 @@ export function parseInputs(): ActionInputs {
 
   // --- Numeric ---
   const minConfidenceRaw = core.getInput('min-confidence');
-  const minConfidence = minConfidenceRaw ? parseInt(minConfidenceRaw, 10) : 40;
+  const minConfidenceParsed = minConfidenceRaw ? parseInt(minConfidenceRaw, 10) : 40;
+  const minConfidence = Number.isNaN(minConfidenceParsed) ? 40 : minConfidenceParsed;
 
   const codebaseBudgetRaw = core.getInput('codebase-budget');
-  const codebaseBudget = codebaseBudgetRaw ? parseInt(codebaseBudgetRaw, 10) : 8000;
+  const codebaseBudgetParsed = codebaseBudgetRaw ? parseInt(codebaseBudgetRaw, 10) : 8000;
+  const codebaseBudget = Number.isNaN(codebaseBudgetParsed) ? 8000 : codebaseBudgetParsed;
 
   // --- custom-lenses-dir ---
   const customLensesDir = core.getInput('custom-lenses-dir') || undefined;
@@ -107,7 +112,8 @@ export function parseInputs(): ActionInputs {
 
   // --- PR number ---
   const prNumberRaw = core.getInput('pr-number');
-  const prNumber = prNumberRaw ? parseInt(prNumberRaw, 10) : undefined;
+  const prNumberParsed = prNumberRaw ? parseInt(prNumberRaw, 10) : undefined;
+  const prNumber = prNumberParsed !== undefined && Number.isNaN(prNumberParsed) ? undefined : prNumberParsed;
 
   // --- comment-mode ---
   const commentModeRaw = core.getInput('comment-mode') || 'full';
