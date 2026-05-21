@@ -1,57 +1,319 @@
 # AgentReview
 
 [![npm version](https://img.shields.io/npm/v/agentreview.svg)](https://www.npmjs.com/package/agentreview)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Action-blue?logo=github)](https://github.com/vidyasagarr7/agentreview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Node.js 20+](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 
-Multi-perspective automated PR review using parallel AI agents — security, architecture, and code quality lenses running in parallel against any GitHub PR.
+AI-powered multi-lens code review for pull requests and codebases — security, architecture, and quality analysis with confidence scoring, auto-fix, multi-model ensemble, and GitHub Actions integration.
 
 ## Features
 
-- 🔴 **Security lens** — auth flaws, injection risks, secret exposure, insecure patterns
-- 🏗️ **Architecture lens** — design violations, coupling, scalability, API contracts
-- ✅ **Quality lens** — error handling, test coverage, documentation, maintainability
-- 🔌 **Custom lenses** — write your own JSON lens definitions
-- 🚀 **Parallel execution** — all lenses run concurrently for speed
-- 🔁 **Smart dedup** — cross-lens duplicate findings are merged automatically
-- 📝 **Markdown & JSON output** — pipe to files, CI artifacts, or post directly to GitHub
-- ⚡ **CI-friendly** — `--fail-on` exit code 2 for gate-able pipelines
+- 🔍 **Multi-lens PR review** — Security, architecture, and quality lenses run in parallel
+- 🎯 **Confidence scoring** — Validation gate filters false positives with configurable thresholds
+- 🔧 **Auto-fix** — Generate, apply, verify, and revert patches for confirmed findings
+- 🤝 **Multi-model ensemble** — Cross-validate findings across multiple LLM providers
+- 🧠 **Codebase awareness** — Repo tree and import graph context for smarter reviews
+- 🔒 **Security scanner** — Deep codebase security analysis across 8 domains
+- ⚡ **GitHub Action** — Drop-in CI/CD integration with PR comments and step summaries
+- 🔌 **Custom lenses** — Write your own review perspectives as JSON
+- 📝 **Dual provider support** — Works with both OpenAI and Anthropic models
+- 🚀 **CI-friendly** — `--fail-on` exit codes for gate-able pipelines
 
-## Installation
+## Quick Start
 
-### From npm
+### GitHub Action (recommended)
+
+```yaml
+- uses: vidyasagarr7/agentreview@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+### CLI
+
+```bash
+npm install -g agentreview
+agentreview https://github.com/owner/repo/pull/123
+```
+
+## GitHub Action
+
+### Basic Usage
+
+```yaml
+name: Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vidyasagarr7/agentreview@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+### Advanced Usage
+
+```yaml
+- uses: vidyasagarr7/agentreview@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    model: claude-sonnet-4-20250514
+    lenses: security,quality
+    fail-on: HIGH
+    validate: true
+    min-confidence: 60
+    codebase-context: true
+    codebase-budget: 12000
+    comment-mode: collapsed
+    verbose: true
+```
+
+### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `anthropic-api-key` | — | Anthropic API key (required if not using `openai-api-key`) |
+| `openai-api-key` | — | OpenAI API key (required if not using `anthropic-api-key`) |
+| `model` | `claude-sonnet-4-20250514` | LLM model to use |
+| `lenses` | `all` | Comma-separated lenses or `all` |
+| `fail-on` | — | Fail if findings ≥ severity (`CRITICAL\|HIGH\|MEDIUM\|LOW\|INFO`) |
+| `validate` | `true` | Enable confidence scoring and validation |
+| `min-confidence` | `40` | Minimum confidence score (0–100) to keep a finding |
+| `codebase-context` | `true` | Enable repo tree + import graph context |
+| `codebase-budget` | `8000` | Token budget for codebase context |
+| `comment-mode` | `full` | PR comment mode: `full`, `summary`, or `collapsed` |
+| `custom-lenses-dir` | — | Path to custom lens JSON files (requires `actions/checkout`) |
+| `github-token` | `${{ github.token }}` | GitHub token for API access |
+| `pr-number` | — | Override PR number (for `workflow_dispatch` or `issue_comment` triggers) |
+| `verbose` | `false` | Enable verbose logging |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `findings-count` | Total number of findings |
+| `critical-count` | Number of CRITICAL findings |
+| `high-count` | Number of HIGH findings |
+| `review-comment-id` | ID of the posted PR comment |
+| `report` | Full markdown report (may be truncated if >1MB) |
+| `exit-code` | `0` if clean, `2` if findings above `fail-on` threshold |
+
+### Permissions
+
+```yaml
+permissions:
+  contents: read          # Read repository content
+  pull-requests: write    # Post review comments
+```
+
+> **⚠️ `pull_request_target` warning:** If you use `pull_request_target` to review PRs from forks, be aware that the workflow runs with write access to the base repository. Never pass untrusted inputs (like PR branch names) to shell commands without sanitization.
+
+## CLI Reference
+
+### Installation
 
 ```bash
 npm install -g agentreview
 ```
 
-### From source
+### Review a PR
 
 ```bash
-git clone https://github.com/vidyasagarr7/agentreview
-cd agentreview
-npm install
-npm run build
-npm link
+agentreview <pr-url> [options]
+```
+
+```bash
+# Basic review
+agentreview https://github.com/owner/repo/pull/123
+
+# Security lens only, post to GitHub
+agentreview https://github.com/owner/repo/pull/123 --lenses security --post
+
+# JSON output to file
+agentreview https://github.com/owner/repo/pull/123 --format json --output review.json
+
+# Use Anthropic model
+agentreview https://github.com/owner/repo/pull/123 --model claude-sonnet-4-20250514
+
+# CI gate — fail on HIGH or above
+agentreview https://github.com/owner/repo/pull/123 --fail-on HIGH --yes
+```
+
+#### Review Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--lenses <ids>` | `all` | Comma-separated lens IDs or `all` |
+| `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
+| `--timeout <seconds>` | `60` | Per-agent timeout |
+| `--model <model>` | `gpt-4o` | LLM model to use |
+| `--post` | `false` | Post/update review comment on the PR |
+| `--output <file>` | — | Write report to file |
+| `--no-dedup` | `false` | Disable cross-lens deduplication |
+| `--validate` / `--no-validate` | `true` | Enable/disable confidence scoring |
+| `--min-confidence <score>` | `40` | Minimum confidence to keep a finding (0–100) |
+| `--ensemble <models>` | — | Multi-model ensemble (comma-separated) |
+| `--codebase-context` / `--no-codebase-context` | `true` | Enable/disable repo tree + import graph |
+| `--codebase-budget <tokens>` | `8000` | Token budget for codebase context |
+| `-v, --verbose` | `false` | Verbose progress output |
+| `-y, --yes` | `false` | Skip data disclosure prompt |
+
+### Scan a Codebase
+
+Deep security scan of a local directory or GitHub repository across 8 security domains.
+
+```bash
+agentreview scan <target> [options]
+```
+
+```bash
+# Scan a GitHub repo
+agentreview scan https://github.com/owner/repo
+
+# Scan a local directory
+agentreview scan ./my-project
+
+# Focus on specific domains with secret redaction
+agentreview scan https://github.com/owner/repo --focus auth,secrets --redact
+
+# Scan and create a GitHub issue with results
+agentreview scan https://github.com/owner/repo --issue --fail-on HIGH
+
+# Scan a specific branch
+agentreview scan https://github.com/owner/repo --branch develop
+```
+
+#### Security Domains
+
+| Domain | Focus |
+|--------|-------|
+| `auth` | Authentication and authorization |
+| `secrets` | Hardcoded secrets and credentials |
+| `injection` | SQL, command, and template injection |
+| `config` | Security misconfigurations |
+| `deps` | Dependency vulnerabilities |
+| `crypto` | Cryptography misuse |
+| `data-flow` | Sensitive data flow and exposure |
+| `general` | General security patterns |
+
+#### Scan Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--focus <domains>` | all | Comma-separated security domains |
+| `--model <model>` | — | LLM model override |
+| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
+| `--output <file>` | — | Write report to file |
+| `--fail-on <severity>` | — | Exit 2 if findings ≥ severity |
+| `--redact` | `false` | Redact secret patterns before sending to LLM |
+| `--issue` | `false` | Create a GitHub issue with results (GitHub targets only) |
+| `--max-files <n>` | `50` | Maximum files to scan |
+| `--budget <tokens>` | `100000` | Token budget for scan |
+| `--branch <ref>` | — | Branch/ref to scan (GitHub targets) |
+| `--timeout <seconds>` | — | Per-chunk timeout |
+| `-v, --verbose` | `false` | Verbose output |
+| `-y, --yes` | `false` | Skip data disclosure prompt |
+
+### Auto-Fix Findings
+
+Review a PR, then generate and apply patches for confirmed findings.
+
+```bash
+agentreview fix <pr-url> [options]
+```
+
+```bash
+# Dry run — generate patches without applying
+agentreview fix https://github.com/owner/repo/pull/123 --dry-run
+
+# Apply fixes to a local checkout
+agentreview fix https://github.com/owner/repo/pull/123 --repo-dir ./repo
+
+# Only fix high-confidence findings
+agentreview fix https://github.com/owner/repo/pull/123 --repo-dir ./repo --min-confidence 80
+```
+
+The fix pipeline: **Review → Validate → Generate patch → Apply → Verify → Revert if verification fails**.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dry-run` | `false` | Generate patches without applying |
+| `--repo-dir <path>` | — | Local repo checkout (required unless `--dry-run`) |
+| `--min-confidence <score>` | — | Only fix findings above this confidence |
+| `--model <model>` | — | LLM model override |
+| `--output <file>` | — | Write fix report to file |
+| `-v, --verbose` | `false` | Verbose output |
+| `-y, --yes` | `false` | Skip data disclosure prompt |
+
+### Multi-Model Ensemble
+
+Cross-validate findings across multiple models to reduce false positives and increase confidence.
+
+```bash
+agentreview https://github.com/owner/repo/pull/123 \
+  --ensemble claude-sonnet-4-20250514,gpt-4o
+```
+
+Ensemble uses a **majority vote** strategy — findings confirmed by multiple models are ranked higher. The report shows unanimous, majority, and single-source findings separately.
+
+Requires API keys for each provider used (e.g., both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`).
+
+### Codebase Awareness
+
+Automatically fetches the repository tree and analyzes import graphs to give the LLM broader context about the codebase structure.
+
+```bash
+# Enabled by default — disable if you want faster reviews
+agentreview https://github.com/owner/repo/pull/123 --no-codebase-context
+
+# Increase token budget for larger repos
+agentreview https://github.com/owner/repo/pull/123 --codebase-budget 16000
+```
+
+### Confidence Scoring
+
+Validation is enabled by default. Each finding is re-evaluated for accuracy, and low-confidence findings are filtered out.
+
+```bash
+# Raise the bar — only keep findings above 70% confidence
+agentreview https://github.com/owner/repo/pull/123 --min-confidence 70
+
+# Disable validation entirely
+agentreview https://github.com/owner/repo/pull/123 --no-validate
 ```
 
 ## Configuration
 
-AgentReview needs two API tokens. Set them as environment variables or in a `.env` file in your working directory.
+### Environment Variables
 
 ```env
-# Required
-GITHUB_TOKEN=ghp_...          # github.com/settings/tokens (repo or public_repo scope)
-OPENAI_API_KEY=sk-...         # platform.openai.com/api-keys
+# Provider keys (at least one required)
+OPENAI_API_KEY=sk-...               # OpenAI API key
+ANTHROPIC_API_KEY=sk-ant-...        # Anthropic API key
 
-# Optional
-AGENTREVIEW_MODEL=gpt-4o      # default model
-AGENTREVIEW_FORMAT=markdown   # default output format (markdown|json)
-AGENTREVIEW_LENSES=all        # default lenses (all or comma-separated IDs)
-AGENTREVIEW_TIMEOUT=60        # per-agent timeout in seconds
-AGENTREVIEW_FAIL_ON=HIGH      # default fail-on severity for CI use
-AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # skip data disclosure prompt
+# Required
+GITHUB_TOKEN=ghp_...                # github.com/settings/tokens (repo or public_repo scope)
+
+# Optional defaults
+AGENTREVIEW_MODEL=gpt-4o            # Default model
+AGENTREVIEW_FORMAT=markdown          # Default format (markdown|json)
+AGENTREVIEW_LENSES=all               # Default lenses
+AGENTREVIEW_TIMEOUT=60               # Per-agent timeout in seconds
+AGENTREVIEW_FAIL_ON=HIGH             # Default fail-on severity
+AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # Skip data disclosure prompt
 ```
+
+The provider is auto-detected from the model name: `claude-*` → Anthropic, `gpt-*`/`o1-*`/`o3-*` → OpenAI.
 
 ### GitHub Token Scopes
 
@@ -62,172 +324,69 @@ AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1  # skip data disclosure prompt
 
 Create at: https://github.com/settings/tokens
 
-## Usage
-
-```bash
-agentreview <pr-url> [options]
-```
-
-### Basic review
-
-```bash
-agentreview https://github.com/owner/repo/pull/123
-```
-
-### Run specific lenses only
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --lenses security,quality
-```
-
-### Output as JSON
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --format json
-```
-
-### Save to file
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --output review.md
-```
-
-### Post review comment to GitHub
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --post
-```
-
-If a previous AgentReview comment exists on the PR, it will be updated in place rather than creating a new one.
-
-### CI/CD gate — fail on severity
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --fail-on HIGH
-# exits 0 if no HIGH/CRITICAL findings, exits 2 if any are found
-```
-
-### Non-interactive / skip disclosure prompt
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --yes
-# or set AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1
-```
-
-### Use a different model
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --model gpt-4-turbo
-```
-
-## Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--format <format>` | `markdown` | Output format: `markdown` or `json` |
-| `--lenses <ids>` | `all` | Comma-separated lens IDs or `all` |
-| `--fail-on <severity>` | — | Exit 2 if findings ≥ severity (CRITICAL\|HIGH\|MEDIUM\|LOW\|INFO) |
-| `--timeout <seconds>` | `60` | Per-agent timeout in seconds |
-| `--model <model>` | `gpt-4o` | Override LLM model |
-| `--post` | `false` | Post/update review comment on the PR |
-| `--output <file>` | — | Write report to file instead of stdout |
-| `--no-dedup` | `false` | Disable cross-lens finding deduplication |
-| `-v, --verbose` | `false` | Enable verbose progress output |
-| `-y, --yes` | `false` | Skip data disclosure prompt |
-
 ## Built-in Lenses
 
 | ID | Name | Focus |
 |----|------|-------|
-| `security` | Security Review | Auth, injection, secrets, crypto, input validation |
-| `architecture` | Architecture Review | Design patterns, coupling, API contracts, scalability |
-| `quality` | Code Quality Review | Error handling, tests, docs, naming, complexity |
-
-List all available lenses:
+| `security` | Security | OWASP Top 10, auth, injection, secrets, crypto, data exposure |
+| `architecture` | Architecture | Design patterns, coupling, API contracts, scalability |
+| `quality` | Code Quality | Error handling, tests, docs, naming, complexity |
 
 ```bash
-agentreview lenses list
+agentreview lenses list    # List all available lenses
 ```
 
 ## Custom Lenses
 
-Create a JSON file defining your lens:
+Create a JSON file:
 
 ```json
 {
   "id": "performance",
   "name": "Performance Review",
-  "description": "Identifies performance bottlenecks and inefficiencies",
-  "systemPrompt": "You are a performance engineering expert. Analyze the PR diff for: N+1 queries, missing indexes, inefficient algorithms, unnecessary allocations, blocking I/O, and missing caching opportunities.",
+  "description": "Identifies performance bottlenecks",
+  "systemPrompt": "You are a performance expert. Analyze for: N+1 queries, missing indexes, inefficient algorithms, blocking I/O, and missing caching.",
   "focusAreas": ["database queries", "algorithm complexity", "caching", "I/O patterns"],
   "severity": "normal"
 }
 ```
 
-Install it:
+Install and use:
 
 ```bash
 agentreview lenses add ./performance.json
+agentreview https://github.com/owner/repo/pull/123 --lenses performance,security
 ```
 
-Custom lenses are stored in `~/.agentreview/lenses/` and automatically loaded on each run.
-
-## Output Examples
-
-### Markdown (default)
-
-```
-# AgentReview — owner/repo#123
-
-**Fix: typo in auth logic** · Opened by alice · 3 files, +142/-18
-
-| Severity | Count | Meaning |
-|----------|-------|---------|
-| 🔴 CRITICAL | 1 | Must fix before merge |
-| 🟠 HIGH | 2 | Should fix before merge |
-
-### 🔴 [security] Hardcoded secret in config file
-
-**Location:** `src/config.ts:42`
-**Category:** Secret Exposure
-
-The API key is hardcoded as a string literal and will be committed to the repository...
-
-> **Suggestion:** Move the secret to an environment variable and use `process.env.API_KEY`.
-```
-
-### JSON
-
-```bash
-agentreview https://github.com/owner/repo/pull/123 --format json | jq '.stats'
-```
-
-```json
-{
-  "total": 3,
-  "bySeverity": { "CRITICAL": 1, "HIGH": 2, "MEDIUM": 0, "LOW": 0, "INFO": 0 },
-  "byLens": { "security": 2, "architecture": 1 },
-  "cleanLenses": ["quality"],
-  "erroredLenses": [],
-  "parseErrorLenses": []
-}
-```
+Custom lenses are stored in `~/.agentreview/lenses/` and loaded automatically.
 
 ## CI/CD Integration
 
-### GitHub Actions
+### GitHub Action (primary)
+
+See [GitHub Action](#github-action) above for full configuration.
+
+### Manual GitHub Actions Workflow
 
 ```yaml
-- name: AgentReview
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY: "1"
-  run: |
-    npx agentreview ${{ github.event.pull_request.html_url }} \
-      --fail-on HIGH \
-      --post \
-      --yes
+name: Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vidyasagarr7/agentreview@v1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail-on: HIGH
+          comment-mode: collapsed
 ```
 
 ### Exit Codes
@@ -238,34 +397,29 @@ agentreview https://github.com/owner/repo/pull/123 --format json | jq '.stats'
 | `1` | Error (config, network, parse) |
 | `2` | Findings found at or above `--fail-on` severity |
 
-## Data Privacy
+## Security & Privacy
 
-AgentReview sends PR diffs to your configured LLM provider (default: OpenAI). This may include proprietary code. Review the data policies:
+AgentReview sends code (PR diffs or source files) to your configured LLM provider. This may include proprietary code.
 
-- OpenAI: https://openai.com/policies/api-data-usage-policies
-- Anthropic: https://www.anthropic.com/legal/privacy
+- **OpenAI:** https://openai.com/policies/api-data-usage-policies
+- **Anthropic:** https://www.anthropic.com/legal/privacy
 
-To suppress the interactive prompt, set `AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1`.
+To suppress the interactive disclosure prompt: set `AGENTREVIEW_ACKNOWLEDGE_DATA_POLICY=1` or pass `--yes`.
+
+**Secret redaction** (scan only): Use `--redact` to strip known secret patterns before sending code to the LLM.
+
+> **⚠️ `pull_request_target`:** If using `pull_request_target` for fork PRs, the workflow runs with write access to the base repo. Never pass untrusted inputs to shell commands.
 
 ## Development
 
 ```bash
-# Install dependencies
+git clone https://github.com/vidyasagarr7/agentreview
+cd agentreview
 npm install
-
-# Build
 npm run build
-
-# Run tests
-npm test
-
-# Watch mode
-npm run dev
+npm test          # typecheck + vitest
+npm run dev       # watch mode
 ```
-
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
