@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { httpPhiScanner } from './http-phi.js';
-import { resetCounter, type ScannerOptions } from './types.js';
+import { type ScannerOptions } from './types.js';
 
 function opts(overrides?: Partial<ScannerOptions>): ScannerOptions {
   return {
@@ -12,7 +12,6 @@ function opts(overrides?: Partial<ScannerOptions>): ScannerOptions {
 }
 
 describe('httpPhiScanner', () => {
-  beforeEach(() => resetCounter());
 
   it('flags http:// URL in a PHI-relevant file as CRITICAL', () => {
     const files = new Map([

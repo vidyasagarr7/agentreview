@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { fhirRulesScanner } from './fhir-rules.js';
-import { resetCounter, type ScannerOptions } from './types.js';
+import { type ScannerOptions } from './types.js';
 
 function opts(): ScannerOptions {
   return { phiFields: new Set(['patientName']), phiSourcePatterns: [] };
@@ -12,7 +12,6 @@ function withFetchImport(code: string): string {
 }
 
 describe('fhirRulesScanner', () => {
-  beforeEach(() => resetCounter());
 
   // ── Check 1: _elements ──────────────────────────────────────────────────
 

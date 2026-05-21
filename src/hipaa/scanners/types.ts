@@ -12,8 +12,6 @@ export interface Scanner {
   scan(files: Map<string, string>, options: ScannerOptions): AgentFinding[];
 }
 
-let counter = 0;
-
 export function createDeterministicFinding(opts: {
   scannerId: string;
   severity: FindingSeverity;
@@ -24,8 +22,10 @@ export function createDeterministicFinding(opts: {
   suggestion: string;
   regulation: string;
 }): AgentFinding {
+  // Deterministic ID from scanner + location (stable across runs, no global counter)
+  const locHash = opts.location.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 40);
   return {
-    id: `${opts.scannerId}-${(++counter).toString().padStart(3, '0')}`,
+    id: `${opts.scannerId}-${locHash}`,
     severity: opts.severity,
     category: opts.category,
     location: opts.location,
@@ -40,4 +40,3 @@ export function createDeterministicFinding(opts: {
   };
 }
 
-export function resetCounter(): void { counter = 0; }

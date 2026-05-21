@@ -32,7 +32,9 @@ function matchesPhiSourcePatterns(path: string, patterns?: string[]): boolean {
   if (!patterns || patterns.length === 0) return false;
   return patterns.some((pat) => {
     // Simple glob: convert * to .* for matching
-    const re = new RegExp(pat.replace(/\*/g, '.*'));
+    // Convert simple glob to regex: escape special chars except *, then convert * to .*
+    const escaped = pat.replace(/[+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    const re = new RegExp(escaped);
     return re.test(path);
   });
 }

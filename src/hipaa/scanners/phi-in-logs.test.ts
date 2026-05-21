@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { phiInLogsScanner } from './phi-in-logs.js';
-import { resetCounter, type ScannerOptions } from './types.js';
+import { type ScannerOptions } from './types.js';
 import { buildPhiFieldSet } from '../phi-patterns.js';
 
 describe('phi-in-logs scanner', () => {
   let options: ScannerOptions;
 
   beforeEach(() => {
-    resetCounter();
     options = { phiFields: buildPhiFieldSet(), skipTests: true };
   });
 

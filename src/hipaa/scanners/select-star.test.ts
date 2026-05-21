@@ -1,13 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { selectStarScanner } from './select-star.js';
-import { resetCounter, type ScannerOptions } from './types.js';
+import { type ScannerOptions } from './types.js';
 import { buildPhiFieldSet } from '../phi-patterns.js';
 
 describe('select-star scanner', () => {
   let options: ScannerOptions;
 
   beforeEach(() => {
-    resetCounter();
     options = { phiFields: buildPhiFieldSet() };
   });
 

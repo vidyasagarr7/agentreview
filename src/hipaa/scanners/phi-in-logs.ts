@@ -13,18 +13,28 @@ const TEST_FILE_PATTERN = /(?:\.test\.[tj]sx?|\.spec\.[tj]sx?|__tests__\/)/;
 // Detect if a line is the start/continuation of a multiline template literal or object literal
 function isMultilineContext(line: string): boolean {
   const trimmed = line.trim();
-  // Open brace/paren/backtick without close on same line
-  const openBraces = (trimmed.match(/[{(`]/g) || []).length;
-  const closeBraces = (trimmed.match(/[})`]/g) || []).length;
-  return openBraces > closeBraces;
+  // Count parens and braces (not backticks — they're symmetric)
+  const openCount = (trimmed.match(/[{(]/g) || []).length;
+  const closeCount = (trimmed.match(/[})]/g) || []).length;
+  // Also check for trailing comma, unclosed template literal
+  const hasTrailingComma = /,\s*$/.test(trimmed);
+  const oddBackticks = ((trimmed.match(/`/g) || []).length % 2) !== 0;
+  return openCount > closeCount || hasTrailingComma || oddBackticks;
 }
+
+// Short common words that need access-pattern context to avoid FPs
+const BROAD_FIELDS = new Set(['email', 'phone', 'address', 'name', 'condition', 'procedure', 'medication', 'treatment', 'status', 'type', 'code']);
 
 function containsPhiField(line: string, phiFields: Set<string>): string | undefined {
   for (const field of phiFields) {
-    // Match field as a word boundary — covers obj.field, { field: }, field=, etc.
-    const re = new RegExp(`\\b${escapeRegex(field)}\\b`);
-    if (re.test(line)) {
-      return field;
+    if (BROAD_FIELDS.has(field.toLowerCase())) {
+      // Require access pattern: obj.field, obj['field'], { field: val }, field=val
+      const accessRe = new RegExp(`\\.${escapeRegex(field)}\\b|\\['${escapeRegex(field)}'\\]|\\b${escapeRegex(field)}\\s*[:=]`);
+      if (accessRe.test(line)) return field;
+    } else {
+      // Specific fields (ssn, mrn, dateOfBirth, etc.) — word boundary match is safe
+      const re = new RegExp(`\\b${escapeRegex(field)}\\b`);
+      if (re.test(line)) return field;
     }
   }
   return undefined;
