@@ -13,6 +13,7 @@ export interface HipaaConfig {
   noBaa?: string[];         // Domains/patterns WITHOUT BAA (explicit deny)
   phiSources?: string[];    // File patterns that handle PHI (e.g., "src/services/patient*")
   phiFields?: string[];     // Additional field names to treat as PHI beyond defaults
+  scanners?: Record<string, boolean>;  // Enable/disable individual deterministic scanners
 }
 
 export interface RepoConfig {
@@ -41,7 +42,7 @@ const KNOWN_KEYS = new Set([
   'hipaa',
 ]);
 
-const KNOWN_HIPAA_KEYS = new Set(['baa-covered', 'no-baa', 'phi-sources', 'phi-fields']);
+const KNOWN_HIPAA_KEYS = new Set(['baa-covered', 'no-baa', 'phi-sources', 'phi-fields', 'scanners']);
 
 const KNOWN_SCAN_KEYS = new Set(['focus', 'redact', 'max-files']);
 
@@ -160,6 +161,16 @@ export async function loadRepoConfig(repoRoot: string): Promise<RepoConfig | nul
     }
     if (Array.isArray(hipaaObj['phi-fields'])) {
       hipaa.phiFields = hipaaObj['phi-fields'].filter((v): v is string => typeof v === 'string');
+    }
+    if (hipaaObj.scanners && typeof hipaaObj.scanners === 'object' && !Array.isArray(hipaaObj.scanners)) {
+      const scannersObj = hipaaObj.scanners as Record<string, unknown>;
+      const scanners: Record<string, boolean> = {};
+      for (const [key, val] of Object.entries(scannersObj)) {
+        if (typeof val === 'boolean') {
+          scanners[key] = val;
+        }
+      }
+      hipaa.scanners = scanners;
     }
     config.hipaa = hipaa;
   }
