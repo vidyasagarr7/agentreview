@@ -1,5 +1,6 @@
 // ─── import-graph-full.ts — Full-repo bidirectional import graph ─────────────
 
+import pLimit from 'p-limit';
 import type { ImportEdge, RepoTree, CodebaseContextDiagnostic } from '../../types/index.js';
 import type { FullImportGraph } from './types.js';
 import { detectLanguage, parseImports } from '../../codebase/parser.js';
@@ -68,77 +69,76 @@ export async function buildFullImportGraph(
     });
   }
 
-  for (const filePath of supportedFiles) {
-    let source: string | null = null;
-    try {
-      source = await fetcher.fetchFile(filePath);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      diagnostics.push({
-        level: 'error',
-        message: `Failed to fetch file ${filePath}: ${msg}`,
-      });
-      filesFailed++;
-      continue;
-    }
+  // Parallelize file fetching + parsing (concurrency 10)
+  const limit = pLimit(10);
+  const fileResults: Array<{ filePath: string; edges: ImportEdge[] } | { filePath: string; error: string }> = [];
 
-    if (source === null) {
-      diagnostics.push({
-        level: 'warn',
-        message: `File not found or empty: ${filePath}`,
-      });
-      filesFailed++;
-      continue;
-    }
+  await Promise.all(
+    supportedFiles.map((filePath) =>
+      limit(async () => {
+        let source: string | null = null;
+        try {
+          source = await fetcher.fetchFile(filePath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          fileResults.push({ filePath, error: `Failed to fetch: ${msg}` });
+          return;
+        }
 
-    let rawImports;
-    try {
-      rawImports = parseImports(source);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      diagnostics.push({
-        level: 'error',
-        message: `Parse error in ${filePath}: ${msg}`,
-      });
+        if (source === null) {
+          fileResults.push({ filePath, error: 'File not found or empty' });
+          return;
+        }
+
+        let rawImports;
+        try {
+          rawImports = parseImports(source);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          fileResults.push({ filePath, error: `Parse error: ${msg}` });
+          return;
+        }
+
+        const edges: ImportEdge[] = [];
+        for (const rawImport of rawImports) {
+          const isExt = !isRelativeImport(rawImport.module);
+          let resolvedTo: string;
+          if (isExt) {
+            resolvedTo = rawImport.module;
+          } else {
+            const resolved = resolveImport(filePath, rawImport.module, tree);
+            resolvedTo = resolved ?? rawImport.module;
+          }
+          const edge: ImportEdge = { from: filePath, to: resolvedTo, external: isExt };
+          if (rawImport.symbols && rawImport.symbols.length > 0) {
+            edge.symbols = rawImport.symbols;
+          }
+          edges.push(edge);
+        }
+
+        fileResults.push({ filePath, edges });
+      }),
+    ),
+  );
+
+  // Merge results (sequential to avoid Map race conditions)
+  for (const result of fileResults) {
+    if ('error' in result) {
+      diagnostics.push({ level: 'warn', message: `${result.filePath}: ${result.error}` });
       filesFailed++;
       continue;
     }
 
     filesAnalyzed++;
-    const fileEdges: ImportEdge[] = [];
+    importsOut.set(result.filePath, result.edges);
 
-    for (const rawImport of rawImports) {
-      const isExternal = !isRelativeImport(rawImport.module);
-
-      let resolvedTo: string;
-      if (isExternal) {
-        resolvedTo = rawImport.module;
-      } else {
-        const resolved = resolveImport(filePath, rawImport.module, tree);
-        resolvedTo = resolved ?? rawImport.module;
-      }
-
-      const edge: ImportEdge = {
-        from: filePath,
-        to: resolvedTo,
-        external: isExternal,
-      };
-
-      if (rawImport.symbols && rawImport.symbols.length > 0) {
-        edge.symbols = rawImport.symbols;
-      }
-
-      fileEdges.push(edge);
-
-      // Build reverse edge for internal imports
-      if (!isExternal) {
-        const existing = importsIn.get(resolvedTo) ?? [];
+    for (const edge of result.edges) {
+      if (!edge.external) {
+        const existing = importsIn.get(edge.to) ?? [];
         existing.push(edge);
-        importsIn.set(resolvedTo, existing);
+        importsIn.set(edge.to, existing);
       }
     }
-
-    importsOut.set(filePath, fileEdges);
   }
 
   return {

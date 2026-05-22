@@ -13,10 +13,11 @@ import type {
 // ─── Sink severity ordering (higher index = worse) ───────────────────────────
 
 const SINK_SEVERITY_ORDER: PhiSinkType[] = [
-  'cache', 'analytics', 'search-index', 'storage',
+  'cache', 'search-index', 'storage',
   'template-render', 'document-gen', 'queue', 'notification',
-  'response', 'webhook', 'apm', 'error-tracking',
-  'external-api', 'log',
+  'response', 'apm',
+  'log', 'error-tracking', 'analytics',
+  'webhook', 'external-api',  // External data transfer is highest risk for HIPAA
 ];
 
 // ─── Source specificity ordering (higher index = more specific) ───────────────
@@ -242,12 +243,16 @@ function traceForward(ctx: TraceContext): void {
   if (ctx.currentHops.length >= ctx.maxDepth) return;
 
   const currentProfile = ctx.profiles.get(ctx.currentFile);
-  if (!currentProfile) return;
+  // Don't bail if profile is missing — still traverse import edges
+  // so "glue" files outside the maxFiles cap don't sever taint chains.
 
   // ─── Runtime flows (event-emit, queue-publish) ────────────────────────
-  for (const rf of currentProfile.runtimeFlows) {
+  // Only check runtime flows if we have a profile for this file
+  const runtimeFlows = currentProfile?.runtimeFlows ?? [];
+  for (const rf of runtimeFlows) {
     if (rf.type !== 'event-emit' && rf.type !== 'queue-publish') continue;
 
+    const isDynamic = rf.channel === '<dynamic>' || rf.channel === '<unknown>';
     const key = `${rf.type === 'event-emit' ? 'event' : 'queue'}:${rf.channel}`;
     const listeners = ctx.runtimeListeners.get(key) ?? [];
 
@@ -277,7 +282,7 @@ function traceForward(ctx: TraceContext): void {
           sinkLine: sink.line,
           sinkType: sink.type,
           hasTransform: ctx.hasTransform,
-          hasDynamicChannel: true,
+          hasDynamicChannel: ctx.hasDynamicChannel || isDynamic,
         });
       }
 
@@ -289,7 +294,7 @@ function traceForward(ctx: TraceContext): void {
         currentFile: listener.file,
         visited: newVisited,
         currentHops: newHops,
-        hasDynamicChannel: true,
+        hasDynamicChannel: ctx.hasDynamicChannel || isDynamic,
       });
     }
   }
@@ -301,11 +306,11 @@ function traceForward(ctx: TraceContext): void {
     if (ctx.visited.has(importingFile)) continue;
 
     const importingProfile = ctx.profiles.get(importingFile);
-    if (!importingProfile) continue;
+    // Don't skip files without profiles — still traverse through them
 
     // Check if importing file has transforms that handle the imported symbols
     let transformFound = false;
-    if (edge.symbols) {
+    if (importingProfile && edge.symbols) {
       for (const sym of edge.symbols) {
         for (const transform of importingProfile.transforms) {
           if (transform.inputParam === sym || transform.name === sym) {
@@ -324,8 +329,9 @@ function traceForward(ctx: TraceContext): void {
       mechanism: transformFound ? 'transform' : 'import',
     }];
 
-    // Check sinks in importing file
-    for (const sink of importingProfile.sinks) {
+    // Check sinks in importing file (only if profiled)
+    const importingSinks = importingProfile?.sinks ?? [];
+    for (const sink of importingSinks) {
       ctx.candidates.push({
         sourceFile: ctx.originFile,
         sourceName: ctx.source.name,

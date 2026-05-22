@@ -81,11 +81,54 @@ export function extractJson(raw: string): string {
   const fenceMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   if (fenceMatch) return fenceMatch[1].trim();
 
-  // Try to find a JSON object directly
-  const objMatch = raw.match(/\{[\s\S]*\}/);
-  if (objMatch) return objMatch[0];
+  // Try to find a balanced JSON object by scanning for matching braces.
+  // Find the first valid balanced object (outermost), then also check the last
+  // and prefer whichever parses as valid JSON.
+  let firstValid: string | null = null;
+  let lastValid: string | null = null;
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === '{') {
+      const candidate = raw.slice(i);
+      const endIdx = findMatchingBrace(candidate);
+      if (endIdx >= 0) {
+        const extracted = candidate.slice(0, endIdx + 1);
+        if (!firstValid) firstValid = extracted;
+        lastValid = extracted;
+        // Skip past this object to find the next top-level one
+        i += endIdx;
+      }
+    }
+  }
+  // Prefer the last valid object (LLMs put prose first, JSON last),
+  // but fall back to the first if the last doesn't parse.
+  if (lastValid) {
+    try { JSON.parse(lastValid); return lastValid; } catch { /* try first */ }
+  }
+  if (firstValid) return firstValid;
 
   return raw.trim();
+}
+
+// ─── Validate with Retry ─────────────────────────────────────────────────────
+
+// ─── Brace Matching ──────────────────────────────────────────────────────────
+
+/** Find the index of the matching closing brace for a string starting with '{' */
+function findMatchingBrace(s: string): number {
+  if (s[0] !== '{') return -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    if (ch === '}') { depth--; if (depth === 0) return i; }
+  }
+  return -1;
 }
 
 // ─── Validate with Retry ─────────────────────────────────────────────────────

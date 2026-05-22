@@ -5,6 +5,18 @@ import { FilePhiProfileSchema, validateWithRetry } from './schema.js';
 import { PROFILER_SYSTEM_PROMPT, PROFILER_USER_PROMPT, PROFILER_RETRY_PROMPT } from './prompts.js';
 import type { FilePhiProfile, LLMClient, FlowProgressCallback } from './types.js';
 
+// ─── Timeout Utility ──────────────────────────────────────────────────────────
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 // ─── Known PHI Source Imports ─────────────────────────────────────────────────
 // Files importing these packages are prioritized for profiling.
 
@@ -25,20 +37,29 @@ export async function profileFile(
   filePath: string,
   source: string,
   llm: LLMClient,
+  timeoutMs: number = 30_000,
 ): Promise<FilePhiProfile | null> {
-  const rawResponse = await llm.chat([
-    { role: 'system', content: PROFILER_SYSTEM_PROMPT },
-    { role: 'user', content: PROFILER_USER_PROMPT(filePath, source) },
-  ]);
+  const rawResponse = await withTimeout(
+    llm.chat([
+      { role: 'system', content: PROFILER_SYSTEM_PROMPT },
+      { role: 'user', content: PROFILER_USER_PROMPT(filePath, source) },
+    ]),
+    timeoutMs,
+    `profile ${filePath}`,
+  );
 
   return validateWithRetry(
     rawResponse,
     FilePhiProfileSchema,
     async (error: string) => {
-      return llm.chat([
-        { role: 'system', content: PROFILER_SYSTEM_PROMPT },
-        { role: 'user', content: PROFILER_RETRY_PROMPT(filePath, source, error) },
-      ]);
+      return withTimeout(
+        llm.chat([
+          { role: 'system', content: PROFILER_SYSTEM_PROMPT },
+          { role: 'user', content: PROFILER_RETRY_PROMPT(filePath, source, error) },
+        ]),
+        timeoutMs,
+        `retry-profile ${filePath}`,
+      );
     },
   ) as Promise<FilePhiProfile | null>;
 }

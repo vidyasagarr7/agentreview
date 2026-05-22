@@ -288,11 +288,11 @@ function createMockLLM(): LLMClient {
       }
 
       // Verifier call: return VerifierResponse
-      if (userMsg.includes('HIPAA compliance') || userMsg.includes('genuine PHI leak') || userMsg.includes('SOURCE:') && userMsg.includes('SINK:')) {
-        // Extract source and sink files from prompt
-        const sourceMatch = userMsg.match(/SOURCE:.*?in\s+([\w/.:-]+)/);
-        const sinkMatch = userMsg.match(/SINK:.*?in\s+([\w/.:-]+)/);
-        const sinkTypeMatch = userMsg.match(/SINK:.*?\((\w[\w-]*)\)/);
+      if (userMsg.includes('HIPAA compliance') || userMsg.includes('genuine PHI leak') || userMsg.includes('Verify this candidate') || (userMsg.includes('Source:') && userMsg.includes('Sink:'))) {
+        // Extract source and sink files from prompt (supports both old and new prompt formats)
+        const sourceMatch = userMsg.match(/Source:?\s+([\w/.:-]+)/) ?? userMsg.match(/SOURCE:.*?in\s+([\w/.:-]+)/);
+        const sinkMatch = userMsg.match(/Sink:?\s+([\w/.:-]+)/) ?? userMsg.match(/SINK:.*?in\s+([\w/.:-]+)/);
+        const sinkTypeMatch = userMsg.match(/Sink:.*?\((\w[\w-]*)\)/) ?? userMsg.match(/SINK:.*?\((\w[\w-]*)\)/);
 
         const sourceFile = sourceMatch?.[1] ?? '';
         const sinkFile = sinkMatch?.[1] ?? '';

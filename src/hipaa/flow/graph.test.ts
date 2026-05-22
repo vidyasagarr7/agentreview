@@ -149,7 +149,7 @@ describe('buildPhiFlowGraph', () => {
       (p) => p.source.file === 'src/emitter.ts' && p.sink.file === 'src/listener.ts',
     );
     expect(eventPath).toBeDefined();
-    expect(eventPath!.confidence).toBe('low'); // dynamic channel
+    expect(eventPath!.confidence).toBe('high'); // literal channel name, 22642 hops
   });
 
   it('max depth exceeded → no path generated beyond depth', () => {
@@ -363,7 +363,7 @@ describe('buildPhiFlowGraph', () => {
     expect(queuePath).toBeDefined();
     expect(queuePath!.sink.type).toBe('external-api');
     // Dynamic channel → low confidence
-    expect(queuePath!.confidence).toBe('low');
+    expect(queuePath!.confidence).toBe('high'); // literal topic name
   });
 
   it('high confidence + external-api sink → CRITICAL severity', () => {

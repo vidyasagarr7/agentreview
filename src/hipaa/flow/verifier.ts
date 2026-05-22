@@ -10,6 +10,7 @@ import type {
   FlowProgressCallback,
 } from './types.js';
 import { VerifierResponseSchema, validateWithRetry } from './schema.js';
+import { VERIFIER_SYSTEM_PROMPT, VERIFIER_USER_PROMPT } from './prompts.js';
 import type { BaaRegistry } from '../baa-registry.js';
 import { classifyEndpoint } from '../baa-registry.js';
 
@@ -57,62 +58,29 @@ function getSnippet(
     .join('\n');
 }
 
-// ─── Prompts ────────────────────────────────────────────────────────────────
+// ─── Prompt Helpers ─────────────────────────────────────────────────────────
+// Uses prompts from prompts.ts (single source of truth)
 
-function buildSystemPrompt(): string {
-  return `You are a HIPAA compliance verifier analyzing PHI (Protected Health Information) data flow paths in source code.
-
-Your job is to determine whether a given data flow path constitutes a genuine PHI leak or whether the data is properly sanitized, anonymized, or handled in a HIPAA-compliant manner.
-
-Respond with a JSON object matching this exact schema:
-{
-  "isLeak": boolean,       // true if PHI is exposed without proper safeguards
-  "confidence": "high" | "medium" | "low",
-  "explanation": string,   // brief explanation of your assessment
-  "baaRelevant": boolean   // true if BAA status is relevant to this path
+function buildBaaStatusLabel(baaStatus: 'covered' | 'no-baa' | 'unknown' | null): string {
+  if (!baaStatus) return 'N/A — sink is not an external service';
+  if (baaStatus === 'covered') return 'BAA IN PLACE — data transfer may be permissible under BAA terms';
+  if (baaStatus === 'no-baa') return 'NO BAA — sending PHI to this endpoint is a HIPAA violation';
+  return 'BAA STATUS UNKNOWN — treat as potential violation';
 }
 
-Be precise. Only flag real leaks — not projections, anonymized data, or de-identified aggregates.`;
-}
-
-function buildUserPrompt(
+function buildPromptForPath(
   path: PhiFlowPath,
   fileContents: FileContentMap,
   baaStatus: 'covered' | 'no-baa' | 'unknown' | null,
-): string {
-  const sourceSnippet = getSnippet(fileContents, path.source.file, path.source.line);
-  const sinkSnippet = getSnippet(fileContents, path.sink.file, path.sink.line);
+): { system: string; user: string } {
+  const sourceCode = getSnippet(fileContents, path.source.file, path.source.line, 8);
+  const sinkCode = getSnippet(fileContents, path.sink.file, path.sink.line, 8);
+  const baaLabel = buildBaaStatusLabel(baaStatus);
 
-  const intermediateDetails = path.intermediates
-    .map((step, i) => {
-      const snippet = getSnippet(fileContents, step.file, step.line);
-      return `Step ${i + 1}: ${step.name} (${step.mechanism}) in ${step.file}:${step.line}\n${snippet}`;
-    })
-    .join('\n\n');
-
-  let baaSection = '';
-  if (baaStatus) {
-    const statusLabel =
-      baaStatus === 'covered'
-        ? 'BAA IN PLACE — data transfer may be permissible under BAA terms'
-        : baaStatus === 'no-baa'
-          ? 'NO BAA — sending PHI to this endpoint is a HIPAA violation'
-          : 'BAA STATUS UNKNOWN — treat as potential violation';
-    baaSection = `\n\nBAA Status for sink endpoint: ${statusLabel}`;
-  }
-
-  return `Analyze this PHI data flow path for HIPAA compliance:
-
-SOURCE: ${path.source.name} (${path.source.type}) in ${path.source.file}:${path.source.line}
-${sourceSnippet}
-
-${intermediateDetails ? `INTERMEDIATE STEPS:\n${intermediateDetails}\n` : ''}SINK: ${path.sink.name} (${path.sink.type}) in ${path.sink.file}:${path.sink.line}
-${sinkSnippet}
-
-Current severity: ${path.severity}
-Confidence: ${path.confidence}${baaSection}
-
-Is this a genuine PHI leak? Respond with the JSON schema described in your instructions.`;
+  return {
+    system: VERIFIER_SYSTEM_PROMPT,
+    user: VERIFIER_USER_PROMPT(path, sourceCode, sinkCode, baaLabel),
+  };
 }
 
 // ─── Timeout Utility ────────────────────────────────────────────────────────
@@ -166,14 +134,13 @@ export async function verifyPaths(
         baaStatus = classifyEndpoint(path.sink.name, baaRegistry);
       }
 
-      const systemPrompt = buildSystemPrompt();
-      const userPrompt = buildUserPrompt(path, fileContents, baaStatus);
+      const { system, user } = buildPromptForPath(path, fileContents, baaStatus);
 
       try {
         const rawResponse = await withTimeout(
           llm.chat([
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
+            { role: 'system', content: system },
+            { role: 'user', content: user },
           ]),
           callTimeoutMs,
           `verify ${path.source.file}→${path.sink.file}`,
@@ -185,8 +152,8 @@ export async function verifyPaths(
           async (error) => {
             return withTimeout(
               llm.chat([
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt },
+                { role: 'system', content: system },
+                { role: 'user', content: user },
                 {
                   role: 'user' as const,
                   content: `Your previous response failed validation:\n${error}\n\nPlease respond again with valid JSON matching the required schema.`,
