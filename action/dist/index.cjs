@@ -100050,19 +100050,29 @@ function dispositionForScore(score, minConfidence) {
 }
 function applyValidationGate(findings, options = {}) {
   const minConfidence = options.minConfidence ?? 40;
-  return findings.map((finding) => ({
-    ...finding,
-    disposition: dispositionForScore(finding.confidenceScore, minConfidence)
-  }));
+  return findings.map((finding) => {
+    if (finding.deterministic) {
+      return { ...finding, disposition: "confirmed" };
+    }
+    return {
+      ...finding,
+      disposition: dispositionForScore(finding.confidenceScore, minConfidence)
+    };
+  });
 }
 async function validateAgentResults(results, context3, llm, options = {}) {
-  const findings = results.flatMap((result) => Array.isArray(result.findings) ? result.findings : []);
-  if (findings.length === 0) return results;
-  const scored = applyValidationGate(
-    await scoreFindings(findings, context3, llm),
-    options
+  const allFindings = results.flatMap((result) => Array.isArray(result.findings) ? result.findings : []);
+  if (allFindings.length === 0) return results;
+  const llmFindings = allFindings.filter((f4) => !f4.deterministic);
+  const deterministicFindings = allFindings.filter((f4) => f4.deterministic);
+  const scoredLlm = llmFindings.length > 0 ? applyValidationGate(await scoreFindings(llmFindings, context3, llm), options) : [];
+  const scoredDeterministic = deterministicFindings.map((f4) => ({
+    ...f4,
+    disposition: "confirmed"
+  }));
+  const byId = new Map(
+    [...scoredLlm, ...scoredDeterministic].map((finding) => [finding.id, finding])
   );
-  const byId = new Map(scored.map((finding) => [finding.id, finding]));
   return results.map((result) => {
     if (!Array.isArray(result.findings)) return result;
     return {
@@ -100573,7 +100583,7 @@ var KNOWN_KEYS = /* @__PURE__ */ new Set([
   "scan",
   "hipaa"
 ]);
-var KNOWN_HIPAA_KEYS = /* @__PURE__ */ new Set(["baa-covered", "no-baa", "phi-sources", "phi-fields"]);
+var KNOWN_HIPAA_KEYS = /* @__PURE__ */ new Set(["baa-covered", "no-baa", "phi-sources", "phi-fields", "scanners"]);
 var KNOWN_SCAN_KEYS = /* @__PURE__ */ new Set(["focus", "redact", "max-files"]);
 async function loadRepoConfig(repoRoot) {
   const configPath = (0, import_path24.join)(repoRoot, ".agentreview.yml");
@@ -100662,6 +100672,16 @@ async function loadRepoConfig(repoRoot) {
     }
     if (Array.isArray(hipaaObj["phi-fields"])) {
       hipaa.phiFields = hipaaObj["phi-fields"].filter((v2) => typeof v2 === "string");
+    }
+    if (hipaaObj.scanners && typeof hipaaObj.scanners === "object" && !Array.isArray(hipaaObj.scanners)) {
+      const scannersObj = hipaaObj.scanners;
+      const scanners = {};
+      for (const [key, val] of Object.entries(scannersObj)) {
+        if (typeof val === "boolean") {
+          scanners[key] = val;
+        }
+      }
+      hipaa.scanners = scanners;
     }
     config.hipaa = hipaa;
   }
