@@ -437,6 +437,43 @@ hipaa:
 | `hipaa.no-baa` | `string[]` | Domains/glob patterns explicitly without BAA (merged with built-in defaults like OpenAI, Sentry) |
 | `hipaa.phi-sources` | `string[]` | File glob patterns that handle PHI — these get extra scrutiny |
 | `hipaa.phi-fields` | `string[]` | Additional field names to treat as PHI beyond the built-in HIPAA Safe Harbor 18 identifiers |
+| `hipaa.flow-analysis` | `boolean` | Enable/disable cross-file PHI flow analysis (default: `true`) |
+| `hipaa.flow-max-depth` | `number` | Max import chain depth for flow tracing (default: `5`) |
+| `hipaa.flow-max-paths` | `number` | Max suspicious paths to verify per scan (default: `20`) |
+| `hipaa.flow-max-files` | `number` | Max files to profile via LLM (default: `200`) |
+| `hipaa.flow-pr-hop-depth` | `number` | Number of import hops to extend PR-scoped graph (default: `2`) |
+| `hipaa.flow-safe-patterns` | `array` | Known safe patterns for false positive reduction (see below) |
+
+#### Cross-File PHI Flow Analysis
+
+AgentReview traces PHI data flowing across files using a 3-pass pipeline:
+
+1. **Pass 1 — Profiling:** Each file is analyzed with a healthcare-aware LLM prompt that identifies PHI sources (FHIR reads, HL7v2 messages, database queries, CDS Hooks, SMART on FHIR), sinks (logs, analytics, external APIs, queues), and transforms (middleware, event emitters, mappers).
+2. **Pass 2 — Graph Construction:** A deterministic flow graph is built from the import graph + runtime flow edges (event emitters, middleware chains, Kafka/SQS/Redis pub/sub). Forward and reverse edges enable taint tracking in both directions.
+3. **Pass 3 — Verification:** Each candidate leak path is verified by a targeted LLM prompt with source + sink code context. The BAA registry is queried for external sinks — services without a BAA get escalated severity.
+
+**What it catches that single-file review misses:**
+- PHI flowing from a FHIR service → through middleware → to a log call in another file
+- Patient data routed via event emitters or message queues to unprotected sinks
+- IDOR vulnerabilities where auth checks and data access are in different files
+- PHI sent to analytics/monitoring services without BAA coverage
+
+**Safe patterns** reduce false positives by recognizing sanitization functions:
+
+```yaml
+hipaa:
+  flow-safe-patterns:
+    - pattern: "redact*"
+      type: sanitizer
+    - pattern: "maskPhi*"
+      type: sanitizer
+    - pattern: "audit.log*"
+      type: expected-sink     # Audit logging is expected to contain PHI
+    - pattern: "hipaaLogger.*"
+      type: compliant-sink    # HIPAA-compliant logger
+```
+
+Built-in sanitizer patterns (`redact*`, `mask*`, `sanitize*`, `toPublic*`) are always active.
 
 When `hipaa` config is present and the `hipaa` lens is active, AgentReview injects BAA registry context into the review prompt. The HIPAA lens will:
 - Flag PHI sent to endpoints without BAA as **HIGH** or **CRITICAL**

@@ -8,12 +8,24 @@ export interface RepoScanConfig {
   maxFiles?: number;
 }
 
+export interface FlowSafePattern {
+  pattern: string;
+  type: 'sanitizer' | 'projection' | 'expected-sink' | 'compliant-sink';
+}
+
 export interface HipaaConfig {
   baaCovered?: string[];    // Domains/patterns with signed BAA
   noBaa?: string[];         // Domains/patterns WITHOUT BAA (explicit deny)
   phiSources?: string[];    // File patterns that handle PHI (e.g., "src/services/patient*")
   phiFields?: string[];     // Additional field names to treat as PHI beyond defaults
   scanners?: Record<string, boolean>;  // Enable/disable individual deterministic scanners
+  // Cross-file PHI flow analysis
+  flowAnalysis?: boolean;              // Enable/disable flow analysis (default: true)
+  flowMaxDepth?: number;               // Max import chain depth (default: 5)
+  flowMaxPaths?: number;               // Max suspicious paths to verify (default: 20)
+  flowMaxFiles?: number;               // Max files to profile (default: 200)
+  flowSafePatterns?: FlowSafePattern[];  // Known safe patterns for FP reduction
+  flowPrHopDepth?: number;             // PR mode import hop extension (default: 2)
 }
 
 export interface RepoConfig {
@@ -42,7 +54,11 @@ const KNOWN_KEYS = new Set([
   'hipaa',
 ]);
 
-const KNOWN_HIPAA_KEYS = new Set(['baa-covered', 'no-baa', 'phi-sources', 'phi-fields', 'scanners']);
+const KNOWN_HIPAA_KEYS = new Set([
+  'baa-covered', 'no-baa', 'phi-sources', 'phi-fields', 'scanners',
+  'flow-analysis', 'flow-max-depth', 'flow-max-paths', 'flow-max-files',
+  'flow-safe-patterns', 'flow-pr-hop-depth',
+]);
 
 const KNOWN_SCAN_KEYS = new Set(['focus', 'redact', 'max-files']);
 
@@ -171,6 +187,31 @@ export async function loadRepoConfig(repoRoot: string): Promise<RepoConfig | nul
         }
       }
       hipaa.scanners = scanners;
+    }
+    // Flow analysis config
+    if (typeof hipaaObj['flow-analysis'] === 'boolean') {
+      hipaa.flowAnalysis = hipaaObj['flow-analysis'];
+    }
+    if (typeof hipaaObj['flow-max-depth'] === 'number') {
+      hipaa.flowMaxDepth = hipaaObj['flow-max-depth'];
+    }
+    if (typeof hipaaObj['flow-max-paths'] === 'number') {
+      hipaa.flowMaxPaths = hipaaObj['flow-max-paths'];
+    }
+    if (typeof hipaaObj['flow-max-files'] === 'number') {
+      hipaa.flowMaxFiles = hipaaObj['flow-max-files'];
+    }
+    if (typeof hipaaObj['flow-pr-hop-depth'] === 'number') {
+      hipaa.flowPrHopDepth = hipaaObj['flow-pr-hop-depth'];
+    }
+    if (Array.isArray(hipaaObj['flow-safe-patterns'])) {
+      hipaa.flowSafePatterns = hipaaObj['flow-safe-patterns']
+        .filter((p): p is Record<string, unknown> => typeof p === 'object' && p !== null)
+        .filter((p) => typeof p.pattern === 'string' && typeof p.type === 'string')
+        .map((p) => ({
+          pattern: p.pattern as string,
+          type: p.type as FlowSafePattern['type'],
+        }));
     }
     config.hipaa = hipaa;
   }

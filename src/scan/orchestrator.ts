@@ -26,6 +26,9 @@ import { redactSecrets } from './redact.js';
 import { loadRepoConfig } from '../config/repo-config.js';
 import { buildHipaaContext } from '../lenses/builtin/hipaa.js';
 import { runDeterministicScan } from '../hipaa/scanners/index.js';
+import { analyzePhiFlow, flowPathsToFindings, buildFlowOptions } from '../hipaa/flow/index.js';
+import type { LLMClient as FlowLLMClient } from '../hipaa/flow/types.js';
+import { buildBaaRegistry } from '../hipaa/baa-registry.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
@@ -267,6 +270,54 @@ export async function scanCodebase(
           durationMs: 0,
         };
         chunkResults.push(syntheticChunk);
+      }
+
+      // e3. Run cross-file PHI flow analysis if enabled (default: true)
+      if (repoConfig.hipaa?.flowAnalysis !== false) {
+        try {
+          const flowOptions = buildFlowOptions(repoConfig.hipaa);
+          flowOptions.mode = 'scan';
+          flowOptions.onProgress = (phase, current, total, detail) => {
+            options.onProgress?.(
+              `flow-${phase}`,
+              current === total ? 'completed' : 'started',
+              { domain: 'data-flow' as any, fileCount: total },
+            );
+          };
+
+          // Adapter: wrap scan LLMClient as flow LLMClient
+          const flowLlm: FlowLLMClient = {
+            chat: async (messages) => {
+              const system = messages.find((m) => m.role === 'system')?.content ?? '';
+              const user = messages.find((m) => m.role === 'user')?.content ?? '';
+              return llm.complete(system, user);
+            },
+          };
+
+          const flowResult = await analyzePhiFlow({
+            options: flowOptions,
+            files: Array.from(fileContentMap.entries()).map(([path, content]) => ({ path, content })),
+            llm: flowLlm,
+            baaRegistry: buildBaaRegistry(repoConfig.hipaa),
+          });
+
+          if (flowResult.paths.length > 0) {
+            const flowFindings = flowPathsToFindings(flowResult.paths);
+            const flowChunk: ChunkResult = {
+              chunkId: 'phi-flow-analysis',
+              domain: 'data-flow' as any,
+              findings: flowFindings,
+              durationMs: flowResult.durationMs,
+            };
+            chunkResults.push(flowChunk);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Flow analysis failure is non-fatal — log and continue
+          if (options.verbose) {
+            console.warn(`⚠️  PHI flow analysis failed: ${msg}`);
+          }
+        }
       }
     }
 
