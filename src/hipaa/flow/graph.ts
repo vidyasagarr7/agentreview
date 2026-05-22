@@ -32,13 +32,13 @@ const SOURCE_SPECIFICITY_ORDER: PhiSourceType[] = [
 // ─── Confidence helpers ──────────────────────────────────────────────────────
 
 function computeConfidence(
-  hops: number,
+  edgeCount: number,
   hasTransform: boolean,
   hasDynamicChannel: boolean,
 ): 'high' | 'medium' | 'low' {
-  if (hasDynamicChannel || hops > 4) return 'low';
-  if (hasTransform || (hops >= 3 && hops <= 4)) return 'medium';
-  if (hops <= 2) return 'high';
+  if (hasDynamicChannel || edgeCount > 4) return 'low';
+  if (hasTransform || (edgeCount >= 3 && edgeCount <= 4)) return 'medium';
+  if (edgeCount <= 2) return 'high';
   return 'medium';
 }
 
@@ -53,7 +53,13 @@ function computeSeverity(
   if (confidence === 'low') {
     for (const sp of safePatterns) {
       if (sp.type === 'expected-sink' || sp.type === 'compliant-sink') {
-        if (new RegExp(sp.pattern).test(sinkName)) return 'INFO';
+        // Escape user-provided pattern to prevent regex injection
+        const escaped = sp.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*');
+        try {
+          if (new RegExp(`^${escaped}$`, 'i').test(sinkName)) return 'INFO';
+        } catch {
+          // Invalid pattern — skip
+        }
       }
     }
   }
@@ -149,8 +155,8 @@ export function buildPhiFlowGraph(
         });
       }
 
-      // Trace through import graph and runtime flows
-      traceForward({
+      // Trace through import graph and runtime flows (both directions)
+      traceFlows({
         currentFile: file,
         originFile: file,
         source,
@@ -168,7 +174,6 @@ export function buildPhiFlowGraph(
   }
 
   // ─── 7b: Dedup ──────────────────────────────────────────────────────────
-  // Same source file+name + same sink file+name → keep shortest
   const dedupMap = new Map<string, CandidatePath>();
   for (const c of candidates) {
     const key = `${c.sourceFile}:${c.sourceName}→${c.sinkFile}:${c.sinkName}`;
@@ -182,15 +187,10 @@ export function buildPhiFlowGraph(
 
   // ─── 7b: Rank and limit ─────────────────────────────────────────────────
   deduped.sort((a, b) => {
-    // 1. Sink type severity (higher index in SINK_SEVERITY_ORDER = worse = first)
     const sinkA = SINK_SEVERITY_ORDER.indexOf(a.sinkType);
     const sinkB = SINK_SEVERITY_ORDER.indexOf(b.sinkType);
     if (sinkA !== sinkB) return sinkB - sinkA;
-
-    // 2. Shorter paths preferred
     if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
-
-    // 3. Source specificity (higher index = more specific = first)
     const srcA = SOURCE_SPECIFICITY_ORDER.indexOf(a.sourceType);
     const srcB = SOURCE_SPECIFICITY_ORDER.indexOf(b.sourceType);
     return srcB - srcA;
@@ -202,9 +202,10 @@ export function buildPhiFlowGraph(
 
   // ─── Convert to PhiFlowPath ──────────────────────────────────────────────
   return deduped.map((c) => {
-    // hops count: intermediates + 1 for final edge to sink
-    const hopCount = c.hops.length + (c.sourceFile !== c.sinkFile ? 1 : 0);
-    const confidence = computeConfidence(hopCount, c.hasTransform, c.hasDynamicChannel);
+    // Edge count = number of hops (each hop IS an edge traversal)
+    // Fix: don't add +1 — hops already represent edges crossed
+    const edgeCount = c.hops.length;
+    const confidence = computeConfidence(edgeCount, c.hasTransform, c.hasDynamicChannel);
     const severity = computeSeverity(
       confidence, c.sinkType, c.sourceType,
       options.safePatterns, c.sinkName,
@@ -222,7 +223,11 @@ export function buildPhiFlowGraph(
   });
 }
 
-// ─── Forward traversal (DFS) ─────────────────────────────────────────────────
+// ─── Bidirectional traversal (DFS) ───────────────────────────────────────────
+// Traces PHI flows in BOTH directions:
+// 1. Up-tree (importsIn): who imports currentFile? (consumer pulls PHI)
+// 2. Down-tree (importsOut): what does currentFile import? (source pushes PHI to dependencies)
+// 3. Runtime flows: event-emit → event-listen, queue-publish → queue-subscribe
 
 interface TraceContext {
   currentFile: string;
@@ -239,15 +244,14 @@ interface TraceContext {
   hasDynamicChannel: boolean;
 }
 
-function traceForward(ctx: TraceContext): void {
+function traceFlows(ctx: TraceContext): void {
   if (ctx.currentHops.length >= ctx.maxDepth) return;
 
   const currentProfile = ctx.profiles.get(ctx.currentFile);
   // Don't bail if profile is missing — still traverse import edges
   // so "glue" files outside the maxFiles cap don't sever taint chains.
 
-  // ─── Runtime flows (event-emit, queue-publish) ────────────────────────
-  // Only check runtime flows if we have a profile for this file
+  // ─── 1. Runtime flows (event-emit, queue-publish) ─────────────────────
   const runtimeFlows = currentProfile?.runtimeFlows ?? [];
   for (const rf of runtimeFlows) {
     if (rf.type !== 'event-emit' && rf.type !== 'queue-publish') continue;
@@ -266,11 +270,10 @@ function traceForward(ctx: TraceContext): void {
         mechanism: rf.type,
       }];
 
+      // Check sinks in listener file (even if unprofiled — use empty sinks)
       const listenerProfile = ctx.profiles.get(listener.file);
-      if (!listenerProfile) continue;
-
-      // Check sinks in listener file
-      for (const sink of listenerProfile.sinks) {
+      const listenerSinks = listenerProfile?.sinks ?? [];
+      for (const sink of listenerSinks) {
         ctx.candidates.push({
           sourceFile: ctx.originFile,
           sourceName: ctx.source.name,
@@ -286,10 +289,10 @@ function traceForward(ctx: TraceContext): void {
         });
       }
 
-      // Continue traversal from listener
+      // Continue traversal from listener (even if unprofiled)
       const newVisited = new Set(ctx.visited);
       newVisited.add(listener.file);
-      traceForward({
+      traceFlows({
         ...ctx,
         currentFile: listener.file,
         visited: newVisited,
@@ -299,16 +302,14 @@ function traceForward(ctx: TraceContext): void {
     }
   }
 
-  // ─── Import graph (reverse edges: who imports currentFile?) ───────────
+  // ─── 2. Up-tree: reverse edges (who imports currentFile?) ─────────────
   const inEdges = ctx.importGraph.importsIn.get(ctx.currentFile) ?? [];
   for (const edge of inEdges) {
     const importingFile = edge.from;
     if (ctx.visited.has(importingFile)) continue;
 
     const importingProfile = ctx.profiles.get(importingFile);
-    // Don't skip files without profiles — still traverse through them
 
-    // Check if importing file has transforms that handle the imported symbols
     let transformFound = false;
     if (importingProfile && edge.symbols) {
       for (const sym of edge.symbols) {
@@ -329,7 +330,6 @@ function traceForward(ctx: TraceContext): void {
       mechanism: transformFound ? 'transform' : 'import',
     }];
 
-    // Check sinks in importing file (only if profiled)
     const importingSinks = importingProfile?.sinks ?? [];
     for (const sink of importingSinks) {
       ctx.candidates.push({
@@ -347,15 +347,69 @@ function traceForward(ctx: TraceContext): void {
       });
     }
 
-    // Continue forward traversal
     const newVisited = new Set(ctx.visited);
     newVisited.add(importingFile);
-    traceForward({
+    traceFlows({
       ...ctx,
       currentFile: importingFile,
       visited: newVisited,
       currentHops: newHops,
       hasTransform: ctx.hasTransform || transformFound,
+    });
+  }
+
+  // ─── 3. Down-tree: forward edges (what does currentFile import?) ──────
+  // This catches PHI pushed INTO dependencies (e.g., logger.info(patientData))
+  const outEdges = ctx.importGraph.importsOut.get(ctx.currentFile) ?? [];
+  for (const edge of outEdges) {
+    if (edge.external) continue;  // Skip node_modules
+    const depFile = edge.to;
+    if (ctx.visited.has(depFile)) continue;
+
+    const depProfile = ctx.profiles.get(depFile);
+
+    // Check if the dependency file has sinks (e.g., it's a logger, API client)
+    const depSinks = depProfile?.sinks ?? [];
+    if (depSinks.length > 0) {
+      const newHops: TraversalHop[] = [...ctx.currentHops, {
+        file: ctx.currentFile,
+        name: edge.symbols?.[0] ?? 'default',
+        line: 1,
+        mechanism: 'import-call',
+      }];
+
+      for (const sink of depSinks) {
+        ctx.candidates.push({
+          sourceFile: ctx.originFile,
+          sourceName: ctx.source.name,
+          sourceLine: ctx.source.line,
+          sourceType: ctx.source.type,
+          hops: newHops,
+          sinkFile: depFile,
+          sinkName: sink.name,
+          sinkLine: sink.line,
+          sinkType: sink.type,
+          hasTransform: ctx.hasTransform,
+          hasDynamicChannel: ctx.hasDynamicChannel,
+        });
+      }
+    }
+
+    // Continue traversal into dependency (even if no sinks here — deeper deps may have them)
+    const newHops: TraversalHop[] = [...ctx.currentHops, {
+      file: ctx.currentFile,
+      name: edge.symbols?.[0] ?? 'default',
+      line: 1,
+      mechanism: 'import-call',
+    }];
+
+    const newVisited = new Set(ctx.visited);
+    newVisited.add(depFile);
+    traceFlows({
+      ...ctx,
+      currentFile: depFile,
+      visited: newVisited,
+      currentHops: newHops,
     });
   }
 }

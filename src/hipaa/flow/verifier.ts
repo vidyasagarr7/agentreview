@@ -167,13 +167,25 @@ export async function verifyPaths(
 
         if (!validated) {
           failures++;
-          checkAbortThreshold();
           return;
         }
 
         // Build the verified path
+        // Use verifier's confidence if it's higher than heuristic
+        const verifierConf = validated.confidence;
+        let finalConfidence = path.confidence;
+        const confOrder = { low: 0, medium: 1, high: 2 } as const;
+        if (confOrder[verifierConf] > confOrder[finalConfidence]) {
+          finalConfidence = verifierConf;
+        }
+
         let finalSeverity = path.severity;
         const baaRelevant = validated.baaRelevant;
+
+        // If verifier confirmed with high confidence, upgrade severity
+        if (validated.isLeak && verifierConf === 'high' && finalSeverity === 'MEDIUM') {
+          finalSeverity = 'HIGH';
+        }
 
         // Severity escalation: external sink without BAA
         if (
@@ -186,10 +198,12 @@ export async function verifyPaths(
 
         const verifiedPath: VerifiedPath = {
           ...path,
+          confidence: finalConfidence,
           severity: finalSeverity,
           isLeak: validated.isLeak,
           explanation: validated.explanation,
           baaRelevant,
+          verifierConfidence: verifierConf,
           ...(baaStatus ? { baaStatus: baaStatus } : {}),
         };
 
@@ -199,21 +213,16 @@ export async function verifyPaths(
         }
       } catch {
         failures++;
-        checkAbortThreshold();
-        return;
       } finally {
         completed++;
         onProgress?.('verifying', completed, paths.length);
+        // Check abort threshold after every attempt (completed includes failures)
+        if (completed >= 3 && failures / completed > failureAbortThreshold) {
+          aborted = true;
+        }
       }
     }),
   );
-
-  function checkAbortThreshold(): void {
-    const attemptsSoFar = completed + failures;
-    if (attemptsSoFar > 0 && failures / attemptsSoFar > failureAbortThreshold) {
-      aborted = true;
-    }
-  }
 
   await Promise.all(tasks);
 

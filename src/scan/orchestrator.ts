@@ -250,10 +250,18 @@ export async function scanCodebase(
       }
     }
 
+    // Discover ALL files for HIPAA analysis (not limited by scan maxFiles)
+    // Scan maxFiles limits LLM chunk analysis; HIPAA flow has its own flowMaxFiles
+    let allDiscoveredFiles = classifiedFiles;
+    if (repoConfig?.hipaa && options.maxFiles && classifiedFiles.length === options.maxFiles) {
+      // classifiedFiles was truncated — re-discover without limit for HIPAA
+      allDiscoveredFiles = await discoverFiles(effectiveReader, options.focus);
+    }
+
     if (repoConfig?.hipaa) {
-      // Build file content map from discovered files
+      // Build file content map from ALL discovered files (not scan-limited)
       const fileContentMap = new Map<string, string>();
-      for (const cf of classifiedFiles) {
+      for (const cf of allDiscoveredFiles) {
         const content = await effectiveReader.readFile(cf.path);
         if (content !== null) {
           fileContentMap.set(cf.path, content);

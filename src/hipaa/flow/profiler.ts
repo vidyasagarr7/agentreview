@@ -27,6 +27,20 @@ const PHI_SOURCE_IMPORTS = new Set([
   'cds-hooks',
 ]);
 
+// Sink-related packages — files importing these are likely sinks and should
+// also be prioritized to avoid being cut by maxFiles (Gemini + Codex finding)
+const PHI_SINK_IMPORTS = new Set([
+  'winston', 'bunyan', 'pino', 'log4js',            // loggers
+  'axios', 'node-fetch', 'got', 'superagent',       // HTTP clients
+  'sentry', '@sentry/node', 'bugsnag', 'rollbar',   // error tracking
+  'mixpanel', 'segment', 'analytics-node',           // analytics
+  'redis', 'ioredis',                                // cache
+  'kafkajs', 'amqplib', 'sqs-consumer',              // queues
+  'nodemailer', 'sendgrid', 'twilio',                // notifications
+  'elasticsearch', '@elastic/elasticsearch',          // search
+  'newrelic', 'dd-trace', '@datadog/native-appsec',  // APM
+]);
+
 // ─── Single-File Profiling ────────────────────────────────────────────────────
 
 /**
@@ -86,6 +100,14 @@ function filePriorityScore(file: FileEntry): number {
   for (const pkg of Array.from(PHI_SOURCE_IMPORTS)) {
     if (file.content.includes(pkg)) {
       score += 100;
+      break;
+    }
+  }
+
+  // (1b) Known sink-related imports — also prioritize sink files
+  for (const pkg of Array.from(PHI_SINK_IMPORTS)) {
+    if (file.content.includes(pkg)) {
+      score += 80;
       break;
     }
   }

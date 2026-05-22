@@ -151,6 +151,8 @@ export interface VerifiedPath extends PhiFlowPath {
   explanation: string;
   baaRelevant: boolean;
   baaStatus?: 'covered' | 'no-baa' | 'unknown';
+  /** Verifier's own confidence assessment (may override heuristic) */
+  verifierConfidence?: 'high' | 'medium' | 'low';
 }
 
 // ─── Full Import Graph (Bidirectional) ────────────────────────────────────────
