@@ -348,11 +348,13 @@ async function reviewPR(prUrl: string, opts: {
 // ── CLI setup ─────────────────────────────────────────────────────────────────
 
 const program = new Command();
+program.enablePositionalOptions();
+program.passThroughOptions();
 
 program
   .name('agentreview')
   .description('Multi-perspective automated PR review using parallel AI agents')
-  .version('0.1.0')
+  .version('1.0.0')
   .argument('<pr-url>', 'GitHub PR URL (e.g. https://github.com/owner/repo/pull/123)')
   .addOption(
     new Option('--format <format>', 'Output format')
