@@ -21,6 +21,7 @@ import { checkDataDisclosure } from './disclosure.js';
 import { createLensesCommand } from './commands/lenses.js';
 import { createFixCommand } from './commands/fix.js';
 import { createScanCommand } from './commands/scan.js';
+import { createTraceCommand } from './commands/trace.js';
 import { runEnsemble } from '../ensemble/index.js';
 import { renderEnsembleReport } from '../ensemble/renderer.js';
 import { buildCodebaseContext } from '../codebase/index.js';
@@ -516,5 +517,6 @@ program
 program.addCommand(createLensesCommand());
 program.addCommand(createFixCommand());
 program.addCommand(createScanCommand());
+program.addCommand(createTraceCommand());
 
 program.parseAsync(process.argv);

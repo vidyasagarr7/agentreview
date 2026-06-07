@@ -7,6 +7,8 @@ import { selectStarScanner } from './select-star.js';
 import { httpPhiScanner } from './http-phi.js';
 import { fhirRulesScanner } from './fhir-rules.js';
 import { hl7PhiScanner } from './hl7-phi.js';
+import { encryptionScanner } from './encryption.js';
+import { auditTrailScanner } from './audit-trail.js';
 
 const ALL_SCANNERS: Scanner[] = [
   phiInLogsScanner,
@@ -14,6 +16,8 @@ const ALL_SCANNERS: Scanner[] = [
   httpPhiScanner,
   fhirRulesScanner,
   hl7PhiScanner,
+  encryptionScanner,
+  auditTrailScanner,
 ];
 
 /**
