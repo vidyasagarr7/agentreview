@@ -12,40 +12,41 @@ function estimateTokens(text: string): number {
 
 function renderToolCall(call: TraceToolCall): string {
   const name = call.name;
+  const nameLower = name.toLowerCase();
   const input = call.input || {};
 
-  if (name === 'Bash') {
+  if (nameLower === 'bash') {
     let cmd = (typeof input.command === 'string' ? input.command : '').trim();
     if (cmd.length > BASH_CMD_MAX) cmd = cmd.slice(0, BASH_CMD_MAX) + '…';
     const status = call.result ? (call.result.isError ? ' → ERR' : ' → OK') : '';
     return `Bash: ${cmd}${status}`;
   }
 
-  if (name === 'Write' || name === 'Edit') {
+  if (nameLower === 'write' || nameLower === 'edit' || nameLower === 'replace') {
     const fp = typeof input.file_path === 'string' ? input.file_path : '';
     const content = typeof input.content === 'string' ? input.content : '';
     const sizeKb = (content.length / 1024).toFixed(1);
     return `${name} ${fp} (${sizeKb}KB)`;
   }
 
-  if (name === 'Read') {
+  if (nameLower === 'read') {
     const fp = typeof input.file_path === 'string' ? input.file_path : '';
     return `Read ${fp}`;
   }
 
-  if (name === 'Grep' || name === 'Glob') {
+  if (nameLower === 'grep' || nameLower === 'glob') {
     const pattern = typeof input.pattern === 'string' ? input.pattern :
       typeof input.query === 'string' ? input.query : '';
     const path = typeof input.path === 'string' ? input.path : '';
     return `${name} "${pattern}"${path ? ` in ${path}` : ''}`;
   }
 
-  if (name === 'Task') {
+  if (nameLower === 'task') {
     const desc = typeof input.description === 'string' ? input.description.slice(0, 100) : '';
     return `Subagent: ${desc}`;
   }
 
-  if (name === 'TodoWrite') return '';  // scratch, skip
+  if (nameLower === 'todowrite') return '';  // scratch, skip
 
   // Generic tool
   const fp = typeof input.file_path === 'string' ? input.file_path : '';

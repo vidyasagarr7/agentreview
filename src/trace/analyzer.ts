@@ -16,8 +16,10 @@ function isSimilarToolCall(a: TraceToolCall, b: TraceToolCall): boolean {
   const pathA = typeof a.input.file_path === 'string' ? a.input.file_path : '';
   const pathB = typeof b.input.file_path === 'string' ? b.input.file_path : '';
   if (pathA && pathB) return pathA === pathB;
-  // Generic: compare JSON-stringified input
-  return JSON.stringify(a.input) === JSON.stringify(b.input);
+  // Generic: deep equality with sorted keys
+  const sortedStringify = (obj: Record<string, unknown>) =>
+    JSON.stringify(Object.keys(obj).sort().reduce((acc, k) => ({ ...acc, [k]: obj[k] }), {}));
+  return sortedStringify(a.input) === sortedStringify(b.input);
 }
 
 /**

@@ -1,4 +1,6 @@
-const REDACT_PATTERNS: Array<{ name: string; regex: RegExp; replacement: string | ((match: string, ...args: string[]) => string) }> = [
+type ReplaceFn = (match: string, ...args: string[]) => string;
+
+const REDACT_PATTERNS: Array<{ name: string; regex: RegExp; replacement: string | ReplaceFn }> = [
   // Specific patterns first (order matters — more specific before general)
   { name: 'Anthropic Key', regex: /sk-ant-[a-zA-Z0-9_-]{20,}/g, replacement: '[REDACTED_ANTHROPIC_KEY]' },
   { name: 'AWS Access Key', regex: /AKIA[0-9A-Z]{16}/g, replacement: '[REDACTED_AWS_KEY]' },
@@ -10,7 +12,7 @@ const REDACT_PATTERNS: Array<{ name: string; regex: RegExp; replacement: string 
   { name: 'Connection String', regex: /(?:postgres|mysql|mongodb|redis|amqp):\/\/[^\s'"]+/g, replacement: '[REDACTED_CONN_STRING]' },
   // New patterns from vibeshub analysis
   { name: 'JWT', regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, replacement: '[REDACTED_JWT]' },
-  { name: 'Env Assignment', regex: /([A-Z][A-Z0-9_]{2,}_(?:KEY|TOKEN|SECRET|PASSWORD|PASS))=([A-Za-z0-9/+=_-]{16,})/g, replacement: ((_match: string, key: string) => `${key}=[REDACTED_ENV]`) as unknown as string },
+  { name: 'Env Assignment', regex: /([A-Z][A-Z0-9_]{2,}_(?:KEY|TOKEN|SECRET|PASSWORD|PASS))=([A-Za-z0-9/+=_-]{16,})/g, replacement: (_match: string, key: string) => `${key}=[REDACTED_ENV]` },
   { name: 'AWS Secret Key', regex: /(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])/g, replacement: '[REDACTED_AWS_SECRET]' },
   { name: 'Generic High-Entropy', regex: /(?<=['"])[A-Za-z0-9+\/]{40,}={0,2}(?=['"])/g, replacement: '[REDACTED_BASE64]' },
 ];
@@ -46,9 +48,10 @@ export function redactSecrets(content: string): { redacted: string; count: numbe
   for (const pattern of REDACT_PATTERNS) {
     const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
     if (typeof pattern.replacement === 'function') {
+      const fn = pattern.replacement as ReplaceFn;
       redacted = redacted.replace(regex, (...args: string[]) => {
         count++;
-        return (pattern.replacement as (...a: string[]) => string)(...args);
+        return fn(...args);
       });
     } else {
       redacted = redacted.replace(regex, () => { count++; return pattern.replacement as string; });
