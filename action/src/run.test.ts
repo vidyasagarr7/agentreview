@@ -22,12 +22,14 @@ const mockGetPR = vi.fn();
 const mockGetBaseSha = vi.fn();
 
 vi.mock('../../src/github/client.js', () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
-    getPR: mockGetPR,
-    getBaseSha: mockGetBaseSha,
-    getRepoTree: vi.fn(),
-    getFileContent: vi.fn(),
-  })),
+  GitHubClient: vi.fn().mockImplementation(function () {
+    return {
+      getPR: mockGetPR,
+      getBaseSha: mockGetBaseSha,
+      getRepoTree: vi.fn(),
+      getFileContent: vi.fn(),
+    };
+  }),
 }));
 
 const mockBuildReviewContext = vi.fn();
@@ -43,16 +45,20 @@ vi.mock('../../src/codebase/orchestrator.js', () => ({
 const mockLoadCustomLenses = vi.fn();
 const mockResolveLenses = vi.fn();
 vi.mock('../../src/lenses/registry.js', () => ({
-  LensRegistry: vi.fn().mockImplementation(() => ({
-    loadCustomLenses: mockLoadCustomLenses,
-    resolveLenses: mockResolveLenses,
-  })),
+  LensRegistry: vi.fn().mockImplementation(function () {
+    return {
+      loadCustomLenses: mockLoadCustomLenses,
+      resolveLenses: mockResolveLenses,
+    };
+  }),
 }));
 
 vi.mock('../../src/llm/client.js', () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({
-    complete: vi.fn().mockResolvedValue('{}'),
-  })),
+  LLMClient: vi.fn().mockImplementation(function () {
+    return {
+      complete: vi.fn().mockResolvedValue('{}'),
+    };
+  }),
 }));
 
 const mockDispatchAgents = vi.fn();

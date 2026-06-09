@@ -4,7 +4,7 @@ import type { ModelConfig, ReviewContext, Lens, AgentResult, AgentFinding } from
 
 // Mock LLMClient constructor
 vi.mock('../llm/client.js', () => ({
-  LLMClient: vi.fn(() => ({})),
+  LLMClient: vi.fn(function () { return {}; }),
 }));
 
 // Mock dispatchAgents

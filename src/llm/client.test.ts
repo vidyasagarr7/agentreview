@@ -13,35 +13,41 @@ const testConfig: LLMConfig = {
 // Mock the OpenAI module
 vi.mock('openai', () => {
   return {
-    default: vi.fn().mockImplementation(() => ({
-      chat: {
-        completions: {
-          create: vi.fn(),
+    default: vi.fn().mockImplementation(function () {
+      return {
+        chat: {
+          completions: {
+            create: vi.fn(),
+          },
         },
-      },
-    })),
+      };
+    }),
   };
 });
 
 // Mock the Anthropic module
 vi.mock('@anthropic-ai/sdk', () => {
   return {
-    default: vi.fn().mockImplementation(() => ({
-      messages: {
-        create: vi.fn(),
-      },
-    })),
+    default: vi.fn().mockImplementation(function () {
+      return {
+        messages: {
+          create: vi.fn(),
+        },
+      };
+    }),
   };
 });
 
 // Mock the Google GenAI module
 vi.mock('@google/genai', () => {
   return {
-    GoogleGenAI: vi.fn().mockImplementation(() => ({
-      models: {
-        generateContent: vi.fn(),
-      },
-    })),
+    GoogleGenAI: vi.fn().mockImplementation(function () {
+      return {
+        models: {
+          generateContent: vi.fn(),
+        },
+      };
+    }),
   };
 });
 
@@ -52,9 +58,9 @@ describe('LLMClient', () => {
       choices: [{ message: { content: '["finding1"]' } }],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
     const result = await client.complete('system', 'user');
@@ -65,9 +71,9 @@ describe('LLMClient', () => {
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 401, message: 'Unauthorized' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
     await expect(client.complete('system', 'user')).rejects.toThrow(LLMError);
@@ -78,9 +84,9 @@ describe('LLMClient', () => {
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 404, message: 'Model not found' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
     await expect(client.complete('system', 'user')).rejects.toThrow(/model not found/i);
@@ -92,9 +98,9 @@ describe('LLMClient', () => {
       choices: [{ message: { content: 'result' } }],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
     const result = await client.complete('system', 'user', undefined, { maxTokens: 8192 });
@@ -109,9 +115,9 @@ describe('LLMClient', () => {
       choices: [{ message: { content: 'result' } }],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
     await client.complete('system', 'user');
@@ -125,9 +131,9 @@ describe('LLMClient', () => {
       content: [{ type: 'text', text: 'result' }],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (Anthropic as any).mockImplementation(() => ({
-      messages: { create: mockCreate },
-    }));
+    (Anthropic as any).mockImplementation(function () {
+      return { messages: { create: mockCreate } };
+    });
 
     const anthropicConfig: LLMConfig = { ...testConfig, provider: 'anthropic' };
     const client = new LLMClient(anthropicConfig);
@@ -143,9 +149,9 @@ describe('LLMClient', () => {
       content: [{ type: 'text', text: 'result' }],
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (Anthropic as any).mockImplementation(() => ({
-      messages: { create: mockCreate },
-    }));
+    (Anthropic as any).mockImplementation(function () {
+      return { messages: { create: mockCreate } };
+    });
 
     const anthropicConfig: LLMConfig = { ...testConfig, provider: 'anthropic' };
     const client = new LLMClient(anthropicConfig);
@@ -160,9 +166,9 @@ describe('LLMClient', () => {
       text: 'gemini result',
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (GoogleGenAI as any).mockImplementation(() => ({
-      models: { generateContent: mockGenerateContent },
-    }));
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
 
     const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
     const client = new LLMClient(geminiConfig);
@@ -181,9 +187,9 @@ describe('LLMClient', () => {
       text: 'result',
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (GoogleGenAI as any).mockImplementation(() => ({
-      models: { generateContent: mockGenerateContent },
-    }));
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
 
     const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
     const client = new LLMClient(geminiConfig);
@@ -198,9 +204,9 @@ describe('LLMClient', () => {
       text: 'result',
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (GoogleGenAI as any).mockImplementation(() => ({
-      models: { generateContent: mockGenerateContent },
-    }));
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
 
     const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
     const client = new LLMClient(geminiConfig);
@@ -216,9 +222,9 @@ describe('LLMClient', () => {
       text: '',
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (GoogleGenAI as any).mockImplementation(() => ({
-      models: { generateContent: mockGenerateContent },
-    }));
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
 
     const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
     const client = new LLMClient(geminiConfig);
@@ -230,9 +236,9 @@ describe('LLMClient', () => {
     const OpenAI = (await import('openai')).default;
     const mockCreate = vi.fn().mockRejectedValue({ status: 429, message: 'Rate limit' });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (OpenAI as any).mockImplementation(() => ({
-      chat: { completions: { create: mockCreate } },
-    }));
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
 
     const client = new LLMClient(testConfig);
 

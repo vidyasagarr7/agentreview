@@ -26,6 +26,7 @@ describe('checkDataDisclosure', () => {
 
 describe('checkScanDisclosure', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 

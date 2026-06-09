@@ -25,7 +25,7 @@ const mockOctokit = {
 };
 
 vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(() => mockOctokit),
+  Octokit: vi.fn(function () { return mockOctokit; }),
 }));
 
 const octokit = mockOctokit;
