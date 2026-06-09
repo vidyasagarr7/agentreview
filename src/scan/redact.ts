@@ -49,7 +49,7 @@ export function redactSecrets(content: string): { redacted: string; count: numbe
     const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
     if (typeof pattern.replacement === 'function') {
       const fn = pattern.replacement as ReplaceFn;
-      redacted = redacted.replace(regex, (...args: string[]) => {
+      redacted = redacted.replace(regex, (...args: [string, ...string[]]) => {
         count++;
         return fn(...args);
       });
