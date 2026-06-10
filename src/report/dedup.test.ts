@@ -85,6 +85,196 @@ describe('deduplicateFindings', () => {
     // Should not crash, returns empty
     expect(() => deduplicateFindings(results)).not.toThrow();
   });
+
+  it('returns empty array when ParseError result has no findings array', () => {
+    const parseError: ParseError = { type: 'ParseError', lensId: 'security', raw: 'garbage', message: 'error' };
+    const results = [makeResult('security', parseError as unknown as AgentResult['findings'])];
+    const deduped = deduplicateFindings(results);
+    expect(deduped).toHaveLength(0);
+  });
+
+  // ── Pass 2: Adjacent-severity merge tests ─────────────────────────────────
+
+  it('Pass 2: merges findings with adjacent severity and >80% summary overlap', () => {
+    const highFinding = {
+      id: 'p2-001',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Short detail',
+      suggestion: 'Sanitize inputs',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'p2-002',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'A much longer and more descriptive detail about the issue',
+      suggestion: 'Sanitize inputs properly',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    expect(deduped).toHaveLength(1);
+    // Should keep higher severity (HIGH)
+    expect(deduped[0].severity).toBe('HIGH');
+  });
+
+  it('Pass 2: merged finding keeps longer detail text', () => {
+    const highFinding = {
+      id: 'p2-003',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Short',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'p2-004',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'A much longer and more descriptive detail about the SQL injection issue',
+      suggestion: 'Sanitize',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].detail).toBe(mediumFinding.detail);
+  });
+
+  it('Pass 2: merged finding has union of lens tags', () => {
+    const highFinding = {
+      id: 'p2-005',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'p2-006',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'Detail 2',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    expect(deduped[0].lenses).toContain('security');
+    expect(deduped[0].lenses).toContain('quality');
+  });
+
+  it('Pass 2: does NOT merge findings with >80% overlap but non-adjacent severity', () => {
+    const criticalFinding = {
+      id: 'p2-007',
+      severity: 'CRITICAL' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const lowFinding = {
+      id: 'p2-008',
+      severity: 'LOW' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'Detail 2',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [criticalFinding]),
+      makeResult('quality', [lowFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // CRITICAL and LOW are 3 ranks apart — should NOT merge
+    expect(deduped).toHaveLength(2);
+  });
+
+  it('Pass 2: does NOT merge findings with adjacent severity but <80% overlap', () => {
+    const highFinding = {
+      id: 'p2-009',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'p2-010',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'Completely unrelated memory leak in connection pool',
+      detail: 'Detail 2',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // Adjacent severity but different summaries — should NOT merge
+    expect(deduped).toHaveLength(2);
+  });
+
+  it('Pass 2: does NOT merge findings on different files even with matching severity and summary', () => {
+    const findingFileA = {
+      id: 'p2-011',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const findingFileB = {
+      id: 'p2-012',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/other.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail 2',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [findingFileA]),
+      makeResult('quality', [findingFileB]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // Different files — should NOT merge
+    expect(deduped).toHaveLength(2);
+  });
 });
 
 describe('collectParseErrors', () => {
@@ -101,6 +291,28 @@ describe('collectParseErrors', () => {
 
   it('returns empty when no parse errors', () => {
     const results = [makeResult('security', [findingA])];
+    expect(collectParseErrors(results)).toHaveLength(0);
+  });
+
+  it('collects only parse errors from a mix of valid findings and errors', () => {
+    const parseError1: ParseError = { type: 'ParseError', lensId: 'security', raw: 'bad json', message: 'parse failed' };
+    const parseError2: ParseError = { type: 'ParseError', lensId: 'perf', raw: 'also bad', message: 'parse failed again' };
+    const results = [
+      makeResult('security', parseError1 as unknown as AgentResult['findings']),
+      makeResult('quality', [findingA, findingB]),
+      makeResult('perf', parseError2 as unknown as AgentResult['findings']),
+    ];
+    const errors = collectParseErrors(results);
+    expect(errors).toHaveLength(2);
+    expect(errors[0].lensId).toBe('security');
+    expect(errors[1].lensId).toBe('perf');
+  });
+
+  it('returns empty when results have empty findings arrays', () => {
+    const results = [
+      makeResult('security', []),
+      makeResult('quality', []),
+    ];
     expect(collectParseErrors(results)).toHaveLength(0);
   });
 });
