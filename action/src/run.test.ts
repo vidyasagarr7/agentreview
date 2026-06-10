@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as core from '@actions/core';
 import type { ActionInputs } from './inputs.js';
 import type { PRContext } from './context.js';
 import type {
@@ -79,6 +80,11 @@ vi.mock('../../src/report/consolidator.js', () => ({
 const mockRender = vi.fn();
 vi.mock('../../src/report/renderer.js', () => ({
   render: (...args: unknown[]) => mockRender(...args),
+}));
+
+const mockLoadRepoConfig = vi.fn();
+vi.mock('../../src/config/repo-config.js', () => ({
+  loadRepoConfig: (...args: unknown[]) => mockLoadRepoConfig(...args),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -234,6 +240,7 @@ beforeEach(async () => {
   mockValidateAgentResults.mockResolvedValue(results);
   mockConsolidate.mockReturnValue(report);
   mockRender.mockReturnValue('# Review Report\n\nAll clean!');
+  mockLoadRepoConfig.mockResolvedValue(undefined);
 
   // Dynamic import to pick up mocks
   const mod = await import('./run.js');
@@ -413,5 +420,84 @@ describe('runReview', () => {
     await runReview(inputs, makePRContext());
 
     expect(mockLoadCustomLenses).not.toHaveBeenCalled();
+  });
+
+  it('merges failOn from repo config when Action input is unset', async () => {
+    mockLoadRepoConfig.mockResolvedValue({ failOn: 'HIGH' });
+
+    const findings = [makeFinding({ severity: 'HIGH' })];
+    const report = makeConsolidatedReport(findings);
+    report.stats.total = 1;
+    report.stats.bySeverity.HIGH = 1;
+    mockConsolidate.mockReturnValue(report);
+
+    const inputs = makeInputs({ failOn: undefined });
+    const result = await runReview(inputs, makePRContext());
+
+    // Repo config supplied failOn: 'HIGH', so a HIGH finding should fail
+    expect(result.shouldFail).toBe(true);
+  });
+
+  it('merges minConfidence from repo config when Action input is default', async () => {
+    mockLoadRepoConfig.mockResolvedValue({ minConfidence: 70 });
+
+    const inputs = makeInputs({ validate: true, minConfidence: 40 });
+    await runReview(inputs, makePRContext());
+
+    expect(mockValidateAgentResults).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      { minConfidence: 70 },
+    );
+  });
+
+  it('merges codebaseBudget from repo config when Action input is default', async () => {
+    mockLoadRepoConfig.mockResolvedValue({ codebaseBudget: 12000 });
+
+    const inputs = makeInputs({ codebaseContext: true, codebaseBudget: 8000 });
+    await runReview(inputs, makePRContext());
+
+    expect(mockBuildCodebaseContext).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { enabled: true, budgetTokens: 12000 },
+    );
+  });
+
+  it('warns when codebase context cannot be built', async () => {
+    mockBuildCodebaseContext.mockResolvedValue(undefined);
+
+    const inputs = makeInputs({ codebaseContext: true });
+    const result = await runReview(inputs, makePRContext());
+
+    expect(core.warning).toHaveBeenCalledWith(
+      'Codebase context could not be built — proceeding without it',
+    );
+    expect(result.report).toBeDefined();
+  });
+
+  it('warns via onProgress when a lens fails', async () => {
+    mockDispatchAgents.mockImplementation(
+      async (
+        _lenses: unknown,
+        _ctx: unknown,
+        _llm: unknown,
+        opts: {
+          onProgress?: (
+            lensId: string,
+            status: string,
+            durationMs?: number,
+          ) => void;
+        },
+      ) => {
+        opts.onProgress?.('security', 'failed', 5000);
+        return [{ lensId: 'security', findings: [], durationMs: 5000 }];
+      },
+    );
+
+    await runReview(makeInputs(), makePRContext());
+
+    expect(core.warning).toHaveBeenCalledWith('  [security] failed after 5.0s');
   });
 });
