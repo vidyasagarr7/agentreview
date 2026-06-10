@@ -208,4 +208,97 @@ describe('distillTrace', () => {
     const result = distillTrace(session);
     expect(result).toContain('→ ERR');
   });
+
+  it('renders task tool calls as Subagent: description', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Task', input: { description: 'Write tests for the auth module' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Subagent: Write tests for the auth module');
+  });
+
+  it('truncates task description at 100 chars', () => {
+    const longDesc = 'x'.repeat(150);
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Task', input: { description: longDesc } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Subagent: ' + 'x'.repeat(100));
+    expect(result).not.toContain('x'.repeat(101));
+  });
+
+  it('skips todowrite tool calls (returns empty string)', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [
+          { name: 'TodoWrite', input: { todos: [] } },
+          { name: 'Bash', input: { command: 'echo hi' } },
+        ],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).not.toContain('TodoWrite');
+    expect(result).toContain('Bash: echo hi');
+  });
+
+  it('renders generic tool with file_path', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'NotebookEdit', input: { file_path: 'analysis.ipynb' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('NotebookEdit analysis.ipynb');
+  });
+
+  it('renders generic tool without file_path as just tool name', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'WebSearch', input: { query: 'typescript coverage' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('WebSearch');
+    expect(result).not.toContain('undefined');
+  });
+
+  it('returns null (skips) events with unknown type', () => {
+    const events = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'hello' },
+      { type: 'system', timestamp: '', uuid: 's1', text: 'init' } as any,
+      { type: 'user', timestamp: '', uuid: 'u2', text: 'world' },
+    ];
+    const session = makeSession(events as any);
+    const result = distillTrace(session);
+    const lines = result.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(result).not.toContain('system');
+    expect(result).not.toContain('init');
+  });
+
+  it('keeps short tool-only runs (< 6) without collapsing to exploration summary', () => {
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'x'.repeat(200000) },
+    ];
+    for (let i = 0; i < 4; i++) {
+      events.push({
+        type: 'assistant', timestamp: '', uuid: `a${i}`,
+        toolCalls: [{ name: 'Read', input: { file_path: `file${i}.ts` } }],
+      });
+    }
+    events.push({ type: 'user', timestamp: '', uuid: 'u2', text: 'done' });
+    const session = makeSession(events);
+    const result = distillTrace(session);
+    expect(result).not.toContain('[exploration:');
+    expect(result).toContain('Read file0.ts');
+  });
 });
