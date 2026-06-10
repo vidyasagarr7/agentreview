@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Command } from 'commander';
-import { createScanCommand } from './scan.js';
+import { createScanCommand, parseDomains } from './scan.js';
 
 describe('createScanCommand', () => {
   const cmd = createScanCommand();
@@ -55,5 +55,50 @@ describe('createScanCommand', () => {
     const opt = cmd.options.find((o) => o.long === '--budget');
     expect(opt).toBeDefined();
     expect(opt!.defaultValue).toBe(100000);
+  });
+
+  it.each([
+    '--redact',
+    '--issue',
+    '--verbose',
+    '--yes',
+    '--baseline',
+    '--update-baseline',
+  ])('defaults %s to false', (longFlag) => {
+    const opt = cmd.options.find((o) => o.long === longFlag);
+    expect(opt).toBeDefined();
+    expect(opt!.defaultValue).toBe(false);
+  });
+});
+
+describe('parseDomains', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns correct SecurityDomain[] for valid comma-separated input', () => {
+    expect(parseDomains('auth,secrets')).toEqual(['auth', 'secrets']);
+  });
+
+  it('returns single-element array for a single valid domain', () => {
+    expect(parseDomains('injection')).toEqual(['injection']);
+  });
+
+  it('handles whitespace around domains', () => {
+    expect(parseDomains(' auth , secrets ')).toEqual(['auth', 'secrets']);
+  });
+
+  it('filters empty strings from the split result', () => {
+    expect(parseDomains('auth,,secrets,')).toEqual(['auth', 'secrets']);
+  });
+
+  it('calls process.exit(1) on an invalid domain', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('exit');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => parseDomains('not-a-domain')).toThrow('exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });

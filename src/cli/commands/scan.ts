@@ -16,7 +16,7 @@ const VALID_DOMAINS = new Set<SecurityDomain>([
   'auth', 'secrets', 'injection', 'config', 'deps', 'crypto', 'data-flow', 'general',
 ]);
 
-function parseDomains(raw: string): SecurityDomain[] {
+export function parseDomains(raw: string): SecurityDomain[] {
   const domains = raw.split(',').map((d) => d.trim()).filter(Boolean) as SecurityDomain[];
   for (const d of domains) {
     if (!VALID_DOMAINS.has(d)) {
