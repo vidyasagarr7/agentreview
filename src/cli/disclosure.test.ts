@@ -1,6 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { checkDataDisclosure, checkScanDisclosure } from './disclosure.js';
 
+// Controls the answer the mocked readline returns to the next question() call.
+let mockAnswer = '';
+const mockClose = vi.fn();
+
+vi.mock('readline', () => ({
+  createInterface: () => ({
+    question: (_query: string, callback: (answer: string) => void) => {
+      callback(mockAnswer);
+    },
+    close: mockClose,
+  }),
+}));
+
 describe('checkDataDisclosure', () => {
   beforeEach(() => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -44,6 +57,36 @@ describe('checkDataDisclosure', () => {
     const output = calls.map((c: unknown[]) => c[0]).join('');
     expect(output).toContain('AgentReview sends your PR diff');
     expect(output).toContain('--yes flag');
+  });
+
+  describe('interactive TTY stdin', () => {
+    const originalIsTTY = process.stdin.isTTY;
+
+    beforeEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      mockClose.mockClear();
+      vi.spyOn(process, 'exit').mockClear().mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    });
+
+    it('resolves when user answers y', async () => {
+      mockAnswer = 'y';
+      await expect(checkDataDisclosure(false, false)).resolves.toBeUndefined();
+      expect(mockClose).toHaveBeenCalled();
+      expect(process.exit).not.toHaveBeenCalled();
+    });
+
+    it('calls process.exit(0) when user answers n', async () => {
+      mockAnswer = 'n';
+      await expect(checkDataDisclosure(false, false)).rejects.toThrow('process.exit');
+      expect(mockClose).toHaveBeenCalled();
+      expect(process.exit).toHaveBeenCalledWith(0);
+    });
   });
 });
 
@@ -107,6 +150,36 @@ describe('checkScanDisclosure', () => {
       const calls = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls;
       const output = calls.map((c: unknown[]) => c[0]).join('');
       expect(output).toContain('Non-interactive environment');
+    });
+  });
+
+  describe('interactive TTY stdin', () => {
+    const originalIsTTY = process.stdin.isTTY;
+
+    beforeEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      mockClose.mockClear();
+      vi.spyOn(process, 'exit').mockClear().mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    });
+
+    it('resolves when user answers yes', async () => {
+      mockAnswer = 'yes';
+      await expect(checkScanDisclosure(false, false, baseMeta)).resolves.toBeUndefined();
+      expect(mockClose).toHaveBeenCalled();
+      expect(process.exit).not.toHaveBeenCalled();
+    });
+
+    it('calls process.exit(0) when user answers n', async () => {
+      mockAnswer = 'n';
+      await expect(checkScanDisclosure(false, false, baseMeta)).rejects.toThrow('process.exit');
+      expect(mockClose).toHaveBeenCalled();
+      expect(process.exit).toHaveBeenCalledWith(0);
     });
   });
 });
