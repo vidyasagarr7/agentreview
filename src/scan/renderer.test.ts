@@ -215,4 +215,143 @@ describe('renderScanReport', () => {
       expect(posB).toBeGreaterThan(posA);
     });
   });
+
+  describe('sarif format', () => {
+    it('produces valid SARIF 2.1.0 JSON', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+
+      expect(parsed.$schema).toContain('sarif-schema-2.1.0');
+      expect(parsed.version).toBe('2.1.0');
+      expect(parsed.runs).toHaveLength(1);
+    });
+
+    it('maps tool driver name and informationUri', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const driver = parsed.runs[0].tool.driver;
+
+      expect(driver.name).toBe('AgentReview Security Scanner');
+      expect(driver.informationUri).toContain('agentreview');
+    });
+
+    it('includes a rule entry for each finding', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const rules = parsed.runs[0].tool.driver.rules;
+
+      expect(rules).toHaveLength(6);
+      const first = rules.find((r: { id: string }) => r.id === 'sec-001');
+      expect(first).toBeDefined();
+      expect(first.shortDescription.text).toBe('Hardcoded JWT secret');
+      expect(first.defaultConfiguration.level).toBe('error');
+    });
+
+    it('maps CRITICAL and HIGH findings to error level', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const results = parsed.runs[0].results;
+
+      const critical = results.find((r: { ruleId: string }) => r.ruleId === 'sec-001');
+      const high = results.find((r: { ruleId: string }) => r.ruleId === 'sec-002');
+      expect(critical.level).toBe('error');
+      expect(high.level).toBe('error');
+    });
+
+    it('maps MEDIUM findings to warning level', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const results = parsed.runs[0].results;
+
+      const medium = results.find((r: { ruleId: string }) => r.ruleId === 'sec-004');
+      expect(medium.level).toBe('warning');
+    });
+
+    it('maps LOW and INFO findings to note level', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const results = parsed.runs[0].results;
+
+      const low = results.find((r: { ruleId: string }) => r.ruleId === 'sec-005');
+      const info = results.find((r: { ruleId: string }) => r.ruleId === 'sec-006');
+      expect(low.level).toBe('note');
+      expect(info.level).toBe('note');
+    });
+
+    it('includes location with file and line from finding.location', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const results = parsed.runs[0].results;
+
+      const r = results.find((x: { ruleId: string }) => x.ruleId === 'sec-001');
+      const loc = r.locations[0].physicalLocation;
+      expect(loc.artifactLocation.uri).toBe('src/auth/middleware.ts');
+      expect(loc.region.startLine).toBe(1); // no line in location string → defaults to 1
+    });
+
+    it('parses line number from location string like file.ts:42', () => {
+      const findingWithLine = makeFinding({
+        id: 'sec-line',
+        severity: 'HIGH',
+        location: 'src/routes/user.ts:42',
+        summary: 'SQL injection risk',
+      });
+      const result = makeResult({
+        findings: [findingWithLine],
+        stats: {
+          total: 1,
+          bySeverity: { CRITICAL: 0, HIGH: 1, MEDIUM: 0, LOW: 0, INFO: 0 },
+          byDomain: { general: 1 },
+          cleanDomains: [],
+          erroredChunks: [],
+        },
+        coverage: [],
+      });
+
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const loc = parsed.runs[0].results[0].locations[0].physicalLocation;
+      expect(loc.artifactLocation.uri).toBe('src/routes/user.ts');
+      expect(loc.region.startLine).toBe(42);
+    });
+
+    it('includes invocation metadata with target, branch, and scannedAt', () => {
+      const result = makeResult();
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const inv = parsed.runs[0].invocations[0];
+
+      expect(inv.executionSuccessful).toBe(true);
+      expect(inv.properties.target).toBe('my-app');
+      expect(inv.properties.branch).toBe('main');
+      expect(inv.properties.scannedAt).toBe('2026-05-21T07:00:00Z');
+      expect(inv.properties.filesScanned).toBe(95);
+    });
+
+    it('handles empty findings list gracefully', () => {
+      const result = makeResult({
+        findings: [],
+        stats: {
+          total: 0,
+          bySeverity: { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 },
+          byDomain: {},
+          cleanDomains: [],
+          erroredChunks: [],
+        },
+      });
+
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+
+      expect(parsed.runs[0].tool.driver.rules).toHaveLength(0);
+      expect(parsed.runs[0].results).toHaveLength(0);
+    });
+  });
 });
