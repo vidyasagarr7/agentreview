@@ -116,4 +116,51 @@ describe('verifyFixes', () => {
     expect(results[0].passed).toBe(false);
     expect(results[0].issues[0]).toContain('failed');
   });
+
+  it('extracts an embedded array when surrounded by prose (extractJson fallback)', async () => {
+    const llm = {
+      async complete() {
+        return 'Here: [{"findingId":"sec-001","passed":true,"issues":[]}] end';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(true);
+    expect(results[0].issues).toEqual([]);
+  });
+
+  it('parses the wrapped {results:[...]} format', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify({
+          results: [{ findingId: 'sec-001', passed: false, issues: ['regression'] }],
+        });
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(false);
+    expect(results[0].issues).toContain('regression');
+  });
+
+  it('marks a fix as missing when the LLM omits its findingId entry', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify([{ findingId: 'sec-001', passed: true, issues: [] }]);
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001'), makeFix('sec-002')], context, llm);
+
+    expect(results).toHaveLength(2);
+    expect(results[1].findingId).toBe('sec-002');
+    expect(results[1].passed).toBe(false);
+    expect(results[1].issues[0]).toContain('missing');
+  });
 });
