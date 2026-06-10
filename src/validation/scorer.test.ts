@@ -89,4 +89,91 @@ describe('scoreFindings', () => {
     expect(calls).toBe(2);
     expect(scored.every((f) => f.confidenceScore === 70)).toBe(true);
   });
+
+  it('returns [] for an empty findings array without calling the LLM', async () => {
+    let called = false;
+    const llm = {
+      async complete() {
+        called = true;
+        return '';
+      },
+    };
+
+    const scored = await scoreFindings([], context, llm);
+
+    expect(scored).toEqual([]);
+    expect(called).toBe(false);
+  });
+});
+
+function fixedLlm(raw: string) {
+  return {
+    async complete() {
+      return raw;
+    },
+  };
+}
+
+describe('extractJson (via scoreFindings)', () => {
+  it('parses fenced markdown JSON (```json ... ```)', async () => {
+    const llm = fixedLlm('```json\n{"scores":[{"id":"sec-001","confidenceScore":62}]}\n```');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    expect(scored[0].confidenceScore).toBe(62);
+    expect(scored[0].disposition).toBe('unvalidated');
+  });
+
+  it('extracts an array from a messy string using [ ] bounds', async () => {
+    const llm = fixedLlm('Here are the scores: [{"id":"sec-001","confidenceScore":55}] thanks!');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    expect(scored[0].confidenceScore).toBe(55);
+  });
+
+  it('extracts an object from a messy string using { } bounds', async () => {
+    // No array brackets present, so the parser falls through to the { } branch.
+    const llm = fixedLlm('Result: {"id":"sec-001","confidenceScore":44} end');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    // The extracted object has no `scores` array, so no score is applied.
+    expect(scored[0].confidenceScore).toBeUndefined();
+    expect(scored[0].disposition).toBe('unvalidated');
+  });
+
+  it('throws when nothing parseable is found', async () => {
+    const llm = fixedLlm('absolutely no json content here');
+
+    await expect(scoreFindings([finding], context, llm)).rejects.toThrow(
+      'Validation response did not contain JSON'
+    );
+  });
+});
+
+describe('clampScore (via scoreFindings)', () => {
+  it('returns 0 for non-finite scores (e.g. Infinity from 1e999)', async () => {
+    const llm = fixedLlm('{"scores":[{"id":"sec-001","confidenceScore":1e999}]}');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    expect(scored[0].confidenceScore).toBe(0);
+  });
+
+  it('clamps scores above 100 down to 100', async () => {
+    const llm = fixedLlm('{"scores":[{"id":"sec-001","confidenceScore":150}]}');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    expect(scored[0].confidenceScore).toBe(100);
+  });
+
+  it('clamps negative scores up to 0', async () => {
+    const llm = fixedLlm('{"scores":[{"id":"sec-001","confidenceScore":-25}]}');
+
+    const scored = await scoreFindings([finding], context, llm);
+
+    expect(scored[0].confidenceScore).toBe(0);
+  });
 });
