@@ -256,4 +256,179 @@ describe('LLMClient', () => {
     expect(mockCreate).toHaveBeenCalledTimes(3); // 3 attempts
     vi.useRealTimers();
   });
+
+  it('retries on 503 then succeeds on second attempt', async () => {
+    vi.useFakeTimers();
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn()
+      .mockRejectedValueOnce({ status: 503, message: 'Service Unavailable' })
+      .mockResolvedValueOnce({ choices: [{ message: { content: 'recovered' } }] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    const promise = client.complete('system', 'user');
+    promise.catch(() => undefined);
+
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(10000);
+    }
+
+    const result = await promise;
+    expect(result).toBe('recovered');
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('throws LLMError on 403 auth failure without retry', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockRejectedValue({ status: 403, message: 'Forbidden' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(/authentication failed.*403/i);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws LLMError on 400 non-retryable without retry', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockRejectedValue({ status: 400, message: 'Bad Request' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(/400.*Bad Request/);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws on unknown non-retryable status code without retry', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockRejectedValue({ status: 422, message: 'Unprocessable' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(/422.*Unprocessable/);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws immediately when signal is already aborted before call', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user', controller.signal)).rejects.toThrow(/cancelled/);
+    expect(mockCreate).toHaveBeenCalledTimes(0);
+  });
+
+  it('throws when abort signal fires during provider call', async () => {
+    const OpenAI = (await import('openai')).default;
+    const controller = new AbortController();
+    const mockCreate = vi.fn().mockImplementation(() => {
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      controller.abort();
+      return Promise.reject(err);
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user', controller.signal)).rejects.toThrow(/cancelled/);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('respects retry-after header on 429 responses', async () => {
+    vi.useFakeTimers();
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn()
+      .mockRejectedValueOnce({ status: 429, message: 'Rate limit', headers: { 'retry-after': '5' } })
+      .mockResolvedValueOnce({ choices: [{ message: { content: 'ok' } }] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    const promise = client.complete('system', 'user');
+    promise.catch(() => undefined);
+
+    // The retry-after header says 5 seconds = 5000ms + jitter(500)
+    // Advance enough to cover that
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(10000);
+    }
+
+    const result = await promise;
+    expect(result).toBe('ok');
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('throws on unsupported provider in createProvider', () => {
+    const badConfig: LLMConfig = { ...testConfig, provider: 'unsupported' as any };
+    expect(() => new LLMClient(badConfig)).toThrow(/not supported/);
+  });
+
+  it('throws LLMError on empty OpenAI response', async () => {
+    const OpenAI = (await import('openai')).default;
+    const mockCreate = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: '' } }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (OpenAI as any).mockImplementation(function () {
+      return { chat: { completions: { create: mockCreate } } };
+    });
+
+    const client = new LLMClient(testConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(/empty response/);
+  });
+
+  it('throws LLMError on empty Anthropic response', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const mockCreate = vi.fn().mockResolvedValue({
+      content: [{ type: 'image', text: '' }],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Anthropic as any).mockImplementation(function () {
+      return { messages: { create: mockCreate } };
+    });
+
+    const anthropicConfig: LLMConfig = { ...testConfig, provider: 'anthropic' };
+    const client = new LLMClient(anthropicConfig);
+    await expect(client.complete('system', 'user')).rejects.toThrow(/empty response/);
+  });
+
+  it('Gemini provider cancels on abort signal', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const controller = new AbortController();
+    controller.abort();
+    const mockGenerateContent = vi.fn().mockReturnValue(new Promise(() => {})); // never resolves
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    await expect(client.complete('system', 'user', controller.signal)).rejects.toThrow(/cancelled/);
+  });
 });
