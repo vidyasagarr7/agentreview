@@ -134,4 +134,89 @@ describe('buildReviewContext', () => {
     const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT, { ignore: [] });
     expect(ctx.fileList).toContain('foo.ts');
   });
+
+  it('shows renamed status in file list', () => {
+    const diff = 'diff --git a/old.ts b/new.ts\n+ content\n';
+    const files = [{ filename: 'new.ts', status: 'renamed' as const, additions: 0, deletions: 0, changes: 0 }];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT);
+    expect(ctx.fileList).toContain('renamed');
+  });
+
+  it('skips binary files with no patch', () => {
+    const diff = 'diff --git a/code.ts b/code.ts\n+ real code\n';
+    const files = [
+      { filename: 'code.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 },
+      { filename: 'image.png', status: 'added' as const, additions: 0, deletions: 0, changes: 0 },
+    ];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT);
+    expect(ctx.skippedFiles).toContain('image.png');
+  });
+
+  it('includes per-file summaries for dropped files during truncation', () => {
+    const smallBudget = 5000;
+    const bigPatch = 'diff --git a/huge.ts b/huge.ts\n' + '+ line\n'.repeat(5000);
+    const smallPatch = 'diff --git a/tiny.ts b/tiny.ts\n+ ok\n';
+    const diff = smallPatch + bigPatch;
+    const files = [
+      { filename: 'tiny.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 },
+      { filename: 'huge.ts', status: 'modified' as const, additions: 5000, deletions: 0, changes: 5000 },
+    ];
+
+    const ctx = buildReviewContext(mockPR, diff, files, smallBudget);
+    expect(ctx.truncated).toBe(true);
+    expect(ctx.diff).toContain('diff omitted');
+    expect(ctx.diff).toContain('huge.ts');
+  });
+
+  it('handles truncation with more than 5 dropped files', () => {
+    const smallBudget = 5000;
+    // Create 7 large files that won't fit
+    const files = Array.from({ length: 7 }, (_, i) => ({
+      filename: `big${i}.ts`,
+      status: 'modified' as const,
+      additions: 3000,
+      deletions: 0,
+      changes: 3000,
+    }));
+    const diff = files.map(f =>
+      `diff --git a/${f.filename} b/${f.filename}\n` + '+ x\n'.repeat(3000)
+    ).join('');
+
+    const ctx = buildReviewContext(mockPR, diff, files, smallBudget);
+    expect(ctx.truncated).toBe(true);
+    expect(ctx.truncationNote).toContain('and');
+    expect(ctx.truncationNote).toContain('more');
+  });
+
+  it('handles files with no extractable diff during truncation', () => {
+    const smallBudget = 5200;
+    // File exists in file list but diff section doesn't match (simulating missing diff)
+    const diff = 'diff --git a/exists.ts b/exists.ts\n+ code\n';
+    const files = [
+      { filename: 'exists.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1, patch: '+ code' },
+      { filename: 'ghost.ts', status: 'modified' as const, additions: 50, deletions: 0, changes: 50, patch: '+ ghost code' },
+    ];
+
+    const ctx = buildReviewContext(mockPR, diff, files, smallBudget);
+    // ghost.ts has a patch field but no diff section extractable — should get summary
+    expect(ctx.diff).toContain('exists.ts');
+  });
+
+  it('returns no truncation note when no files are dropped', () => {
+    const diff = 'diff --git a/a.ts b/a.ts\n+ x\n';
+    const files = [{ filename: 'a.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 }];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT);
+    expect(ctx.truncationNote).toBeUndefined();
+  });
+
+  it('handles options without ignore field', () => {
+    const diff = 'diff --git a/foo.ts b/foo.ts\n+ test\n';
+    const files = [{ filename: 'foo.ts', status: 'modified' as const, additions: 1, deletions: 0, changes: 1 }];
+
+    const ctx = buildReviewContext(mockPR, diff, files, MODEL_CONTEXT, {});
+    expect(ctx.truncated).toBe(false);
+  });
 });
