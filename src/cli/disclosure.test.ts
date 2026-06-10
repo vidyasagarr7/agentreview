@@ -1,9 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { checkDataDisclosure, checkScanDisclosure } from './disclosure.js';
 
 describe('checkDataDisclosure', () => {
   beforeEach(() => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  describe('non-TTY stdin', () => {
+    const originalIsTTY = process.stdin.isTTY;
+
+    beforeEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    });
+
+    it('writes a non-interactive error and exits when not acknowledged and not nonInteractive', async () => {
+      await expect(checkDataDisclosure(false, false)).rejects.toThrow('process.exit');
+      expect(process.exit).toHaveBeenCalledWith(1);
+      const calls = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls;
+      const output = calls.map((c: unknown[]) => c[0]).join('');
+      expect(output).toContain('Non-interactive environment');
+    });
   });
 
   it('returns immediately when acknowledged is true', async () => {
@@ -62,5 +85,28 @@ describe('checkScanDisclosure', () => {
     const calls = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls;
     const output = calls.map((c: unknown[]) => c[0]).join('');
     expect(output).not.toContain("'secrets' focus");
+  });
+
+  describe('non-TTY stdin', () => {
+    const originalIsTTY = process.stdin.isTTY;
+
+    beforeEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    });
+
+    it('writes a non-interactive error and exits when not acknowledged and yes is false', async () => {
+      await expect(checkScanDisclosure(false, false, baseMeta)).rejects.toThrow('process.exit');
+      expect(process.exit).toHaveBeenCalledWith(1);
+      const calls = (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls;
+      const output = calls.map((c: unknown[]) => c[0]).join('');
+      expect(output).toContain('Non-interactive environment');
+    });
   });
 });
