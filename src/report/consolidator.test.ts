@@ -165,4 +165,63 @@ describe('consolidate', () => {
       filtered: 1,
     });
   });
+
+  it('breaks severity ties by lens rank (security before quality)', () => {
+    const secMedium = {
+      ...criticalFinding,
+      id: 'sec-tie',
+      severity: 'MEDIUM' as const,
+      location: 'src/zzz.ts:1',
+      lenses: ['security'],
+    };
+    const qualMedium = {
+      ...lowFinding,
+      id: 'qual-tie',
+      severity: 'MEDIUM' as const,
+      location: 'src/aaa.ts:1',
+      lenses: ['quality'],
+    };
+    const results: AgentResult[] = [
+      { lensId: 'quality', findings: [qualMedium], durationMs: 100 },
+      { lensId: 'security', findings: [secMedium], durationMs: 100 },
+    ];
+
+    const report = consolidate(results, mockPR);
+
+    expect(report.findings.map((f) => f.id)).toEqual(['sec-tie', 'qual-tie']);
+  });
+
+  it('breaks severity and lens ties by file path alphabetically', () => {
+    const findingB = {
+      ...criticalFinding,
+      id: 'sec-b',
+      location: 'src/bbb.ts:1',
+      lenses: ['security'],
+    };
+    const findingA = {
+      ...criticalFinding,
+      id: 'sec-a',
+      location: 'src/aaa.ts:1',
+      lenses: ['security'],
+    };
+    const results: AgentResult[] = [
+      { lensId: 'security', findings: [findingB, findingA], durationMs: 100 },
+    ];
+
+    const report = consolidate(results, mockPR);
+
+    expect(report.findings.map((f) => f.id)).toEqual(['sec-a', 'sec-b']);
+  });
+
+  it('skips deduplication when noDedup is true', () => {
+    const results: AgentResult[] = [
+      { lensId: 'security', findings: [criticalFinding], durationMs: 100 },
+      { lensId: 'security', findings: [criticalFinding], durationMs: 100 },
+    ];
+
+    const report = consolidate(results, mockPR, true);
+
+    expect(report.findings).toHaveLength(2);
+    expect(report.stats.total).toBe(2);
+  });
 });
