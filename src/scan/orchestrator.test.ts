@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LLMCompleteOptions } from '../llm/client.js';
 import type { ScanOptions, ScanProgressCallback, SourceReader, FileEntry } from './types.js';
-import { scanCodebase } from './orchestrator.js';
+import { scanCodebase, RedactingReader } from './orchestrator.js';
 
 // Mock analyzePhiFlow so we can make it throw for testing the catch block
 const mockAnalyzePhiFlow = vi.fn();
@@ -587,6 +587,87 @@ describe('scanCodebase', () => {
     expect(flowChunk!.durationMs).toBe(100);
   });
 
+  it('flow analysis onProgress relays flow-prefixed progress events to scan onProgress', async () => {
+    writeTestFiles({
+      '.agentreview.yml': 'hipaa:\n  flow-analysis: true\n',
+      'src/app.ts': 'console.log("hello");',
+    });
+
+    // Capture the onProgress callback the orchestrator wires into flowOptions
+    let flowOnProgress: ((phase: any, current: number, total: number, detail?: string) => void) | undefined;
+    mockAnalyzePhiFlow.mockImplementationOnce(async (arg: any) => {
+      flowOnProgress = arg.options.onProgress;
+      return { paths: [], durationMs: 0 };
+    });
+
+    const progressEvents: Array<{ chunkId: string; status: string; detail: any }> = [];
+    const onProgress: ScanProgressCallback = (chunkId, status, detail) => {
+      progressEvents.push({ chunkId, status, detail });
+    };
+
+    const options = defaultOptions();
+    (options as any).onProgress = onProgress;
+
+    await scanCodebase(tmpDir, options, makeMockLLM(() => '[]') as any, {});
+
+    expect(flowOnProgress).toBeDefined();
+
+    // current !== total → 'started'
+    flowOnProgress!('profiling', 2, 5);
+    // current === total → 'completed'
+    flowOnProgress!('verifying', 5, 5);
+
+    const started = progressEvents.find((e) => e.chunkId === 'flow-profiling');
+    expect(started).toEqual({
+      chunkId: 'flow-profiling',
+      status: 'started',
+      detail: { domain: 'data-flow', fileCount: 5 },
+    });
+
+    const completed = progressEvents.find((e) => e.chunkId === 'flow-verifying');
+    expect(completed).toEqual({
+      chunkId: 'flow-verifying',
+      status: 'completed',
+      detail: { domain: 'data-flow', fileCount: 5 },
+    });
+  });
+
+  it('flow LLM adapter extracts system+user from messages and calls llm.complete', async () => {
+    writeTestFiles({
+      '.agentreview.yml': 'hipaa:\n  flow-analysis: true\n',
+      'src/app.ts': 'console.log("hello");',
+    });
+
+    // Capture the adapter the orchestrator passes to analyzePhiFlow as `llm`
+    let flowLlm: { chat: (messages: Array<{ role: string; content: string }>) => Promise<string> } | undefined;
+    mockAnalyzePhiFlow.mockImplementationOnce(async (arg: any) => {
+      flowLlm = arg.llm;
+      return { paths: [], durationMs: 0 };
+    });
+
+    const llm = makeMockLLM(() => '[]');
+    const options = defaultOptions();
+
+    await scanCodebase(tmpDir, options, llm as any, {});
+
+    expect(flowLlm).toBeDefined();
+    llm.complete.mockClear();
+
+    // Adapter pulls the system + user content out of the messages array
+    const out = await flowLlm!.chat([
+      { role: 'system', content: 'SYSTEM_PROMPT' },
+      { role: 'user', content: 'USER_PROMPT' },
+    ]);
+
+    expect(llm.complete).toHaveBeenCalledWith('SYSTEM_PROMPT', 'USER_PROMPT');
+    expect(out).toBe('[]');
+
+    // Missing roles fall back to empty strings (nullish coalescing branch)
+    llm.complete.mockClear();
+    await flowLlm!.chat([]);
+    expect(llm.complete).toHaveBeenCalledWith('', '');
+  });
+
   it('HIPAA re-discovers files when classifiedFiles truncated by maxFiles', async () => {
     // Create enough files to be truncated by maxFiles=2
     writeTestFiles({
@@ -699,5 +780,51 @@ describe('scanCodebase', () => {
       // All domains should be clean since LLM returned no findings
       expect(result.stats.cleanDomains.length).toBe(result.coverage.length);
     }
+  });
+});
+
+describe('RedactingReader', () => {
+  it('cleanup is a no-op when the inner reader has no cleanup method', async () => {
+    // Inner reader intentionally omits cleanup — exercises the `?.` short-circuit on line 50
+    const inner = {
+      listFiles: vi.fn(async () => []),
+      readFile: vi.fn(async () => null),
+    };
+
+    const reader = new RedactingReader(inner as any);
+
+    await expect(reader.cleanup()).resolves.toBeUndefined();
+  });
+
+  it('cleanup delegates to the inner reader when cleanup is present', async () => {
+    const cleanup = vi.fn(async () => {});
+    const inner = {
+      listFiles: vi.fn(async () => []),
+      readFile: vi.fn(async () => null),
+      cleanup,
+    };
+
+    const reader = new RedactingReader(inner as any);
+    await reader.cleanup();
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('readFile redacts secrets and returns null for missing files', async () => {
+    const files: Record<string, string> = {
+      'config.ts': 'const key = "AKIAIOSFODNN7EXAMPLE1";',
+    };
+    const inner = {
+      listFiles: vi.fn(async () => []),
+      readFile: vi.fn(async (p: string) => files[p] ?? null),
+      cleanup: vi.fn(async () => {}),
+    };
+
+    const reader = new RedactingReader(inner as any);
+
+    const redacted = await reader.readFile('config.ts');
+    expect(redacted).not.toContain('AKIAIOSFODNN7EXAMPLE1');
+
+    expect(await reader.readFile('missing.ts')).toBeNull();
   });
 });

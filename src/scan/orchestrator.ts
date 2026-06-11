@@ -32,7 +32,7 @@ import { buildBaaRegistry } from '../hipaa/baa-registry.js';
 
 // ─── Redacting Reader Wrapper ─────────────────────────────────────────────────
 
-class RedactingReader implements SourceReader {
+export class RedactingReader implements SourceReader {
   constructor(private inner: SourceReader) {}
 
   listFiles() {
