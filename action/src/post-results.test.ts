@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoisted mocks so vi.mock factories can reference them
-const { mockCreateComment, mockUpdateComment, mockPaginate, mockSummaryWrite, mockSummaryAddRaw } = vi.hoisted(() => {
+const { mockCreateComment, mockUpdateComment, mockPaginate, mockSummaryWrite, mockSummaryAddRaw, mockCreateReview } = vi.hoisted(() => {
   const mockSummaryWrite = vi.fn();
   const mockSummaryAddRaw = vi.fn(() => ({ write: mockSummaryWrite }));
   return {
     mockCreateComment: vi.fn(),
     mockUpdateComment: vi.fn(),
+    mockCreateReview: vi.fn(),
     mockPaginate: vi.fn(),
     mockSummaryWrite,
     mockSummaryAddRaw,
@@ -20,6 +21,9 @@ vi.mock('@actions/github', () => ({
         createComment: mockCreateComment,
         updateComment: mockUpdateComment,
         listComments: { endpoint: { merge: vi.fn() } },
+      },
+      pulls: {
+        createReview: mockCreateReview,
       },
     },
     paginate: mockPaginate,
@@ -49,6 +53,7 @@ describe('postResults', () => {
     vi.clearAllMocks();
     mockPaginate.mockResolvedValue([]);
     mockCreateComment.mockResolvedValue({ data: { id: 100 } });
+    mockCreateReview.mockResolvedValue({ data: { id: 900 } });
     mockSummaryAddRaw.mockReturnValue({ write: mockSummaryWrite });
   });
 
@@ -162,6 +167,109 @@ describe('postResults', () => {
     expect(body).toContain('CRITICAL: 1');
     expect(body).toContain('HIGH: 2');
     expect(mockSummaryAddRaw).toHaveBeenCalledWith(report);
+  });
+
+  describe('inline review mode', () => {
+    const makeFinding = (overrides: Partial<import('../../src/types/index.js').AgentFinding> = {}): import('../../src/types/index.js').AgentFinding => ({
+      id: 'f1',
+      severity: 'HIGH',
+      category: 'security',
+      location: 'src/auth.ts:10',
+      summary: 'Test finding',
+      detail: 'Detail text',
+      suggestion: 'Fix it',
+      lenses: ['security'],
+      ...overrides,
+    });
+
+    it('calls pulls.createReview with COMMENT event when inline=true and no failOn', async () => {
+      const findings = [makeFinding()];
+      const changedFiles = ['src/auth.ts'];
+
+      const result = await postResults(
+        '## Report',
+        prContext,
+        'full',
+        defaultStats,
+        { inline: true, findings, changedFiles },
+      );
+
+      expect(result).toEqual({ commentId: 900, created: true });
+      expect(mockCreateReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: 'testowner',
+          repo: 'testrepo',
+          pull_number: 42,
+          event: 'COMMENT',
+          body: '## Report',
+          comments: expect.arrayContaining([
+            expect.objectContaining({
+              path: 'src/auth.ts',
+              line: 10,
+              side: 'RIGHT',
+            }),
+          ]),
+        }),
+      );
+      expect(mockCreateComment).not.toHaveBeenCalled();
+      expect(mockSummaryAddRaw).toHaveBeenCalledWith('## Report');
+    });
+
+    it('calls pulls.createReview with REQUEST_CHANGES event when failOn is set', async () => {
+      const findings = [makeFinding()];
+      const changedFiles = ['src/auth.ts'];
+
+      const result = await postResults(
+        '## Report',
+        prContext,
+        'full',
+        defaultStats,
+        { inline: true, findings, changedFiles, failOn: 'high' },
+      );
+
+      expect(result).toEqual({ commentId: 900, created: true });
+      expect(mockCreateReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'REQUEST_CHANGES',
+        }),
+      );
+    });
+
+    it('includes fallback notice in reviewBody when some findings cannot be mapped', async () => {
+      const findings = [
+        makeFinding({ location: 'src/auth.ts:10' }),
+        makeFinding({ id: 'f2', location: 'unmappable-location' }),
+        makeFinding({ id: 'f3', location: 'other-file.ts:5' }),
+      ];
+      const changedFiles = ['src/auth.ts'];
+
+      await postResults(
+        '## Report',
+        prContext,
+        'full',
+        defaultStats,
+        { inline: true, findings, changedFiles },
+      );
+
+      const body = mockCreateReview.mock.calls[0][0].body as string;
+      expect(body).toContain('2 finding(s) could not be mapped to specific diff lines');
+    });
+
+    it('uses report directly as reviewBody when all findings map to inline comments', async () => {
+      const findings = [makeFinding({ location: 'src/auth.ts:10' })];
+      const changedFiles = ['src/auth.ts'];
+
+      await postResults(
+        '## Report',
+        prContext,
+        'full',
+        defaultStats,
+        { inline: true, findings, changedFiles },
+      );
+
+      const body = mockCreateReview.mock.calls[0][0].body as string;
+      expect(body).toBe('## Report');
+    });
   });
 
   it('comment-mode=collapsed wraps severity sections in details blocks', async () => {
