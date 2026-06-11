@@ -397,6 +397,115 @@ describe('parseTrace — core parsing', () => {
     expect(session.events[0].toolCalls![0].result!.content).toBe('lonely result');
   });
 
+  it('emits a system event for type=system lines', () => {
+    const input = jsonl(
+      {
+        type: 'system',
+        uuid: 'sys1',
+        timestamp: '2025-01-01T00:00:00Z',
+      },
+      {
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2025-01-01T00:00:01Z',
+        message: { role: 'user', content: 'hello' },
+      },
+    );
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(2);
+    expect(session.events[0].type).toBe('system');
+    expect(session.stats.totalEvents).toBe(2);
+  });
+
+  it('increments warnings for unknown event types and does not push an event', () => {
+    const input = jsonl(
+      { type: 'completely-unknown-event-type', uuid: 'x1', timestamp: '2025-01-01T00:00:00Z' },
+      {
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2025-01-01T00:00:01Z',
+        message: { role: 'user', content: 'valid' },
+      },
+    );
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(1);
+    expect(session.warnings).toBe(1);
+  });
+
+  it('handles user message with no content field (undefined content path)', () => {
+    const input = jsonl({
+      type: 'user',
+      uuid: 'u1',
+      timestamp: '2025-01-01T00:00:00Z',
+      message: { role: 'user' }, // no content field
+    });
+    const session = parseTrace(input);
+    // produces a user event with undefined text
+    expect(session.events).toHaveLength(1);
+    expect(session.events[0].type).toBe('user');
+    expect(session.events[0].text).toBeUndefined();
+  });
+
+  it('handles user message with non-array non-string object content (falls back to undefined)', () => {
+    const input = JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      timestamp: '2025-01-01T00:00:00Z',
+      message: { role: 'user', content: { nested: 'object' } }, // object, not array or string
+    });
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(1);
+    expect(session.events[0].text).toBeUndefined();
+  });
+
+  it('flattens tool_result content block where b.content is a string (no b.text)', () => {
+    const input = jsonl(
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        timestamp: '2025-01-01T00:00:00Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }],
+        },
+      },
+      {
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2025-01-01T00:00:01Z',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't1',
+              // Block has content string, not a text field
+              content: [{ type: 'document', content: 'doc content here' }],
+            },
+          ],
+        },
+      },
+    );
+    const session = parseTrace(input);
+    expect(session.events[0].toolCalls![0].result!.content).toContain('doc content here');
+  });
+
+  it('increments warnings when a valid JSON line is not a plain object', () => {
+    const input = [
+      '[1, 2, 3]', // array — not a plain object
+      '42',       // primitive — not a plain object
+      JSON.stringify({
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2025-01-01T00:00:00Z',
+        message: { role: 'user', content: 'ok' },
+      }),
+    ].join('\n');
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(1);
+    expect(session.warnings).toBe(2);
+  });
+
   it('handles 10K+ lines without OOM', () => {
     const lines: string[] = [];
     for (let i = 0; i < 10_000; i++) {
