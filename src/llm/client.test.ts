@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LLMClient, LLMError, type LLMCompleteOptions } from './client.js';
+import { LLMClient, LLMError, sleep, type LLMCompleteOptions } from './client.js';
 import type { LLMConfig } from '../types/index.js';
 
 const testConfig: LLMConfig = {
@@ -430,5 +430,66 @@ describe('LLMClient', () => {
     const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
     const client = new LLMClient(geminiConfig);
     await expect(client.complete('system', 'user', controller.signal)).rejects.toThrow(/cancelled/);
+  });
+
+  it('Gemini provider succeeds with non-aborted signal (if signal branch)', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const mockGenerateContent = vi.fn().mockResolvedValueOnce({
+      text: 'gemini with signal',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    const controller = new AbortController();
+    const result = await client.complete('system', 'user', controller.signal);
+    expect(result).toBe('gemini with signal');
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('Gemini provider rejects when signal aborts during pending request', async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    const controller = new AbortController();
+    const mockGenerateContent = vi.fn().mockReturnValue(new Promise(() => {})); // never resolves
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (GoogleGenAI as any).mockImplementation(function () {
+      return { models: { generateContent: mockGenerateContent } };
+    });
+
+    const geminiConfig: LLMConfig = { ...testConfig, provider: 'google', model: 'gemini-2.5-flash' };
+    const client = new LLMClient(geminiConfig);
+    const promise = client.complete('system', 'user', controller.signal);
+    // Abort after the call has started — hits the abort listener in the Promise.race
+    controller.abort();
+    await expect(promise).rejects.toThrow(/cancelled/);
+  });
+});
+
+describe('sleep', () => {
+  it('rejects immediately when signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(sleep(10000, controller.signal)).rejects.toThrow('Aborted');
+  });
+
+  it('rejects when signal aborts during sleep', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const promise = sleep(10000, controller.signal);
+    promise.catch(() => undefined);
+    controller.abort();
+    await expect(promise).rejects.toThrow('Aborted');
+    vi.useRealTimers();
+  });
+
+  it('resolves after delay with no signal', async () => {
+    vi.useFakeTimers();
+    const promise = sleep(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBeUndefined();
+    vi.useRealTimers();
   });
 });
