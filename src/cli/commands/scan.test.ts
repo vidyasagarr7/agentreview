@@ -30,6 +30,13 @@ vi.mock('../../github/client.js', () => {
   return { GitHubClient };
 });
 
+vi.mock('../../scan/clone.js', () => ({
+  parseGitHubUrl: vi.fn((url: string) => {
+    const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
+    return { owner: match?.[1] ?? 'owner', repo: match?.[2] ?? 'repo' };
+  }),
+}));
+
 vi.mock('ora', () => {
   const spinner = {
     start: vi.fn().mockReturnThis(),
@@ -460,6 +467,71 @@ describe('runScan (via parseAsync)', () => {
     await cmd.parseAsync(['node', 'test', '/tmp/mycode', '--yes', '--issue']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--issue requires a GitHub URL'));
+  });
+
+  it('--baseline-path passes baselinePath to scan options', async () => {
+    setupMocks();
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', '/tmp/mycode', '--yes', '--baseline-path', '/tmp/my-baseline.json']);
+
+    expect(vi.mocked(scanCodebase)).toHaveBeenCalledWith(
+      '/tmp/mycode',
+      expect.objectContaining({ baselinePath: '/tmp/my-baseline.json' }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('--issue with GitHub target creates an issue', async () => {
+    setupMocks();
+    const { GitHubClient } = await import('../../github/client.js');
+    vi.mocked(GitHubClient.prototype.createIssue).mockResolvedValue({ url: 'https://github.com/owner/repo/issues/1' } as any);
+
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', 'https://github.com/owner/repo', '--yes', '--issue']);
+
+    expect(vi.mocked(GitHubClient.prototype.createIssue)).toHaveBeenCalledWith(
+      'owner', 'repo',
+      expect.stringContaining('Security Scan'),
+      expect.any(String),
+      expect.arrayContaining(['security']),
+    );
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(expect.stringContaining('--issue requires a GitHub URL'));
+  });
+
+  it('--issue with GitHub target handles createIssue failure gracefully', async () => {
+    setupMocks();
+    const { GitHubClient } = await import('../../github/client.js');
+    vi.mocked(GitHubClient.prototype.createIssue).mockRejectedValue(new Error('API rate limit'));
+
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', 'https://github.com/owner/repo', '--yes', '--issue']);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('API rate limit'));
+  });
+
+  it('onProgress callback handles started, completed, and failed statuses', async () => {
+    setupMocks();
+    // Capture the onProgress callback by intercepting scanCodebase
+    let capturedOnProgress: ((chunkId: string, status: string, meta?: any) => void) | undefined;
+    vi.mocked(scanCodebase).mockImplementation(async (_target, opts, _llm, _extra) => {
+      capturedOnProgress = (opts as any).onProgress;
+      // Simulate progress events
+      if (capturedOnProgress) {
+        capturedOnProgress('chunk-1', 'started', { domain: 'auth', fileCount: 5 });
+        capturedOnProgress('chunk-1', 'completed', { findingCount: 2, durationMs: 1500 });
+        capturedOnProgress('chunk-2', 'started', { domain: 'secrets', fileCount: 3 });
+        capturedOnProgress('chunk-2', 'failed', {});
+      }
+      return makeScanResult() as any;
+    });
+
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', '/tmp/mycode', '--yes']);
+
+    expect(capturedOnProgress).toBeDefined();
+    // ora was called for the spinners — verify at least scan completed
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('No findings'));
   });
 
   it('--verbose shows stack trace on error', async () => {
