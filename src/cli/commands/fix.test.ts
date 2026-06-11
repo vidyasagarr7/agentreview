@@ -26,10 +26,25 @@ vi.mock('../../github/parse-url.js', () => ({
 vi.mock('../../github/client.js', () => {
   const GitHubClient = vi.fn();
   GitHubClient.prototype.getPR = vi.fn();
-  // Named error classes
-  class GitHubAuthError extends Error { constructor(msg: string) { super(msg); this.name = 'GitHubAuthError'; } }
-  class GitHubNotFoundError extends Error { constructor(msg: string) { super(msg); this.name = 'GitHubNotFoundError'; } }
-  class GitHubRateLimitError extends Error { constructor(msg: string) { super(msg); this.name = 'GitHubRateLimitError'; } }
+  // Named error classes — constructors match the real implementations
+  class GitHubAuthError extends Error {
+    constructor(statusCode = 401) {
+      super(`GitHub token ${statusCode === 403 ? 'lacks required permissions' : 'is missing or invalid'}.`);
+      this.name = 'GitHubAuthError';
+    }
+  }
+  class GitHubNotFoundError extends Error {
+    constructor(owner: string, repo: string, number: number) {
+      super(`PR #${number} not found in ${owner}/${repo}. Check the URL and your token permissions.`);
+      this.name = 'GitHubNotFoundError';
+    }
+  }
+  class GitHubRateLimitError extends Error {
+    constructor(resetAt: string) {
+      super(`GitHub API rate limit exceeded.\nRate limit resets at: ${resetAt}`);
+      this.name = 'GitHubRateLimitError';
+    }
+  }
   return { GitHubClient, GitHubAuthError, GitHubNotFoundError, GitHubRateLimitError };
 });
 
@@ -262,27 +277,27 @@ describe('runFix (via parseAsync)', () => {
   it('error: GitHubAuthError exits with code 1', async () => {
     setupMocks();
     const { GitHubAuthError: GAE } = await import('../../github/client.js');
-    vi.mocked(GitHubClient.prototype.getPR).mockRejectedValue(new GAE('Bad credentials'));
+    vi.mocked(GitHubClient.prototype.getPR).mockRejectedValue(new GAE(401));
 
     const cmd = createFixCommand();
     await expect(
       cmd.parseAsync(['node', 'test', VALID_PR_URL, '--dry-run', '--yes']),
     ).rejects.toThrow('process.exit(1)');
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Bad credentials'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('is missing or invalid'));
   });
 
   it('error: GitHubNotFoundError exits with code 1', async () => {
     setupMocks();
     const { GitHubNotFoundError: GNF } = await import('../../github/client.js');
-    vi.mocked(GitHubClient.prototype.getPR).mockRejectedValue(new GNF('Not found'));
+    vi.mocked(GitHubClient.prototype.getPR).mockRejectedValue(new GNF('octocat', 'test-repo', 42));
 
     const cmd = createFixCommand();
     await expect(
       cmd.parseAsync(['node', 'test', VALID_PR_URL, '--dry-run', '--yes']),
     ).rejects.toThrow('process.exit(1)');
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Not found'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('not found'));
   });
 
   it('error: GitHubRateLimitError exits with code 1', async () => {
@@ -407,8 +422,8 @@ describe('runFix (via parseAsync)', () => {
       cmd.parseAsync(['node', 'test', VALID_PR_URL, '--dry-run', '--yes', '--verbose']),
     ).rejects.toThrow('process.exit(1)');
 
-    const calls = consoleErrorSpy.mock.calls.map((c) => c[0]);
-    expect(calls.some((c: string) => typeof c === 'string' && c.includes('boom'))).toBe(true);
+    const calls = consoleErrorSpy.mock.calls.map((c: unknown[]) => c[0]);
+    expect(calls.some((c: unknown) => typeof c === 'string' && c.includes('boom'))).toBe(true);
   });
 
   it('shows fix summary in output', async () => {

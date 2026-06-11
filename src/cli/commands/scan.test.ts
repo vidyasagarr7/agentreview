@@ -472,8 +472,8 @@ describe('runScan (via parseAsync)', () => {
     ).rejects.toThrow('process.exit(1)');
 
     // One call has the "Unexpected error" and another has the stack
-    const calls = consoleErrorSpy.mock.calls.map((c) => c[0]);
-    expect(calls.some((c: string) => typeof c === 'string' && c.includes('Unexpected error'))).toBe(true);
+    const calls = consoleErrorSpy.mock.calls.map((c: unknown[]) => c[0]);
+    expect(calls.some((c: unknown) => typeof c === 'string' && c.includes('Unexpected error'))).toBe(true);
     // Stack trace is logged when verbose
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error: boom'));
   });
