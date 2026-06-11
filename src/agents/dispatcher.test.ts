@@ -121,4 +121,63 @@ describe('dispatchAgents', () => {
     expect(events).toContain('security:started');
     expect(events).toContain('security:completed');
   });
+
+  it('times out when LLM hangs and returns error with timeout message', async () => {
+    vi.useFakeTimers();
+    try {
+      const mockLLM = {
+        complete: vi.fn().mockImplementation(() => new Promise(() => {})), // never resolves
+      } as unknown as LLMClient;
+
+      const resultPromise = dispatchAgents([mockLenses[0]], mockContext, mockLLM, {
+        timeoutMs: 5000,
+      });
+
+      await vi.runAllTimersAsync();
+      const results = await resultPromise;
+
+      expect(results).toHaveLength(1);
+      expect(results[0].lensId).toBe('security');
+      expect(results[0].error).toMatch(/timed out/i);
+      expect(results[0].findings).toEqual([]);
+      expect(results[0].durationMs).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('calls onProgress with durationMs on success', async () => {
+    const mockLLM = {
+      complete: vi.fn().mockResolvedValue(validFindingResponse),
+    } as unknown as LLMClient;
+
+    const progressEvents: Array<{ lensId: string; status: string; durationMs?: number }> = [];
+    await dispatchAgents([mockLenses[0]], mockContext, mockLLM, {
+      onProgress: (lensId, status, durationMs) => progressEvents.push({ lensId, status, durationMs }),
+    });
+
+    const started = progressEvents.find((e) => e.status === 'started');
+    const completed = progressEvents.find((e) => e.status === 'completed');
+    expect(started).toBeDefined();
+    expect(started!.durationMs).toBeUndefined(); // started has no durationMs
+    expect(completed).toBeDefined();
+    expect(typeof completed!.durationMs).toBe('number');
+    expect(completed!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('calls onProgress with durationMs on failure', async () => {
+    const mockLLM = {
+      complete: vi.fn().mockRejectedValue(new Error('LLM error')),
+    } as unknown as LLMClient;
+
+    const progressEvents: Array<{ lensId: string; status: string; durationMs?: number }> = [];
+    await dispatchAgents([mockLenses[0]], mockContext, mockLLM, {
+      onProgress: (lensId, status, durationMs) => progressEvents.push({ lensId, status, durationMs }),
+    });
+
+    const failed = progressEvents.find((e) => e.status === 'failed');
+    expect(failed).toBeDefined();
+    expect(typeof failed!.durationMs).toBe('number');
+    expect(failed!.durationMs).toBeGreaterThanOrEqual(0);
+  });
 });
