@@ -43,6 +43,14 @@ describe('loadBaseline', () => {
   beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'bl-')); });
   afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }); });
   it('returns null for missing file', async () => { expect(await loadBaseline(join(tmpDir, 'x.json'))).toBeNull(); });
+  it('rethrows non-ENOENT errors (e.g. invalid JSON in file)', async () => {
+    // A file that exists but has malformed JSON triggers JSON.parse to throw,
+    // which has no .code === 'ENOENT', so loadBaseline must rethrow it.
+    const p = join(tmpDir, 'invalid.json');
+    const { writeFile: wf } = await import('fs/promises');
+    await wf(p, 'not valid json {{{', 'utf-8');
+    await expect(loadBaseline(p)).rejects.toThrow(SyntaxError);
+  });
   it('reads valid baseline', async () => {
     const bl = makeBaseline([{ fingerprint: 'abc', severity: 'HIGH', location: 'a.ts:1', summary: 'x', suppressedAt: '2026-01-01T00:00:00.000Z' }]);
     const p = join(tmpDir, 'bl.json');
