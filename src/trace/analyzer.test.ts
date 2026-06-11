@@ -232,4 +232,38 @@ describe('analyzeTrace', () => {
       }
     }
   });
+
+  it('detects retry storm with generic non-Bash tool covering sortedStringify', () => {
+    const events: TraceEvent[] = [];
+    for (let i = 0; i < 3; i++) {
+      events.push({
+        type: 'assistant', timestamp: '', uuid: `a${i}`,
+        toolCalls: [{ name: 'TodoWrite', input: { todos: ['a'] } }],
+      });
+    }
+    const findings = analyzeTrace(makeSession(events));
+    const retries = findings.filter(f => f.signal === 'retry_storm');
+    expect(retries).toHaveLength(1);
+    expect(retries[0].evidence).toContain('TodoWrite');
+  });
+
+  it('does NOT flag low exploration when errors are present', () => {
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'build feature X' },
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [
+          { name: 'Read', input: { file_path: 'a.ts' } },
+          { name: 'Read', input: { file_path: 'b.ts' } },
+          { name: 'Write', input: { file_path: 'c.ts', content: '...' } },
+          { name: 'Write', input: { file_path: 'd.ts', content: '...' } },
+          { name: 'Bash', input: { command: 'npm run build' } },
+          { name: 'Bash', input: { command: 'npm test' }, result: { content: 'err', isError: true } },
+        ],
+      },
+    ];
+    const findings = analyzeTrace(makeSession(events));
+    const lowExplore = findings.filter(f => f.signal === 'low_exploration');
+    expect(lowExplore).toHaveLength(0);
+  });
 });
