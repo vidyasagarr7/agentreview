@@ -246,6 +246,180 @@ describe('deduplicateFindings', () => {
     expect(deduped).toHaveLength(2);
   });
 
+  it('Pass 1: keeps existing longer detail when incoming duplicate has shorter detail', () => {
+    const longDetailFinding = {
+      id: 'p1-001',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:42',
+      summary: 'Hardcoded secret in config',
+      detail: 'A long and descriptive detail string from the first lens',
+      suggestion: 'Fix it',
+      lenses: ['security'],
+    };
+    const shortDetailFinding = {
+      ...longDetailFinding,
+      id: 'p1-002',
+      detail: 'Short',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [longDetailFinding]),
+      makeResult('quality', [shortDetailFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    expect(deduped).toHaveLength(1);
+    // Incoming detail is shorter — keep the first, longer detail
+    expect(deduped[0].detail).toBe(longDetailFinding.detail);
+  });
+
+  it('tokenOverlap: merges findings whose summaries normalize to empty (both-empty token sets)', () => {
+    const highFinding = {
+      id: 'to-001',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: '!!!',
+      detail: 'Detail one',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'to-002',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: '---',
+      detail: 'Detail two',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // Both summaries normalize to empty → tokenOverlap returns 1 → merge
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].severity).toBe('HIGH');
+  });
+
+  it('Pass 2: skips a finding in the outer loop once it has been absorbed', () => {
+    const highFinding = {
+      id: 'skip-001',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'skip-002',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'Detail 2',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const infoFinding = {
+      id: 'skip-003',
+      severity: 'INFO' as const,
+      category: 'Style',
+      location: 'src/auth.ts:99',
+      summary: 'Unrelated naming convention nitpick on a local variable',
+      detail: 'Detail 3',
+      suggestion: 'Rename',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding, mediumFinding, infoFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // high + medium merge; when outer loop reaches the medium (already merged),
+    // it continues. info is unrelated. Result: merged high + info = 2 findings.
+    expect(deduped).toHaveLength(2);
+    expect(deduped.some((f) => f.severity === 'HIGH')).toBe(true);
+    expect(deduped.some((f) => f.severity === 'INFO')).toBe(true);
+  });
+
+  it('Pass 2: skips an already-absorbed finding revisited in the inner loop', () => {
+    const highFinding = {
+      id: 'jskip-001',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'Detail',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const infoFinding = {
+      id: 'jskip-002',
+      severity: 'INFO' as const,
+      category: 'Style',
+      location: 'src/auth.ts:50',
+      summary: 'Unrelated naming convention nitpick on a local variable',
+      detail: 'Detail 2',
+      suggestion: 'Rename',
+      lenses: ['quality'],
+    };
+    const mediumFinding = {
+      id: 'jskip-003',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'Detail 3',
+      suggestion: 'Fix 3',
+      lenses: ['perf'],
+    };
+    // Order matters: high (i=0) absorbs medium (j=2); info (i=1) then revisits
+    // medium (j=2), which is already merged → inner-loop continue.
+    const results = [
+      makeResult('security', [highFinding, infoFinding, mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    // high (merged with medium) + info = 2 findings
+    expect(deduped).toHaveLength(2);
+    expect(deduped.some((f) => f.severity === 'HIGH')).toBe(true);
+    expect(deduped.some((f) => f.severity === 'INFO')).toBe(true);
+  });
+
+  it('Pass 2: keeps a\'s longer detail when absorbed b has shorter detail', () => {
+    const highFinding = {
+      id: 'p2-013',
+      severity: 'HIGH' as const,
+      category: 'Security',
+      location: 'src/auth.ts:10',
+      summary: 'SQL injection vulnerability in user input handler',
+      detail: 'A much longer and more descriptive detail about the issue here',
+      suggestion: 'Fix',
+      lenses: ['security'],
+    };
+    const mediumFinding = {
+      id: 'p2-014',
+      severity: 'MEDIUM' as const,
+      category: 'Security',
+      location: 'src/auth.ts:15',
+      summary: 'SQL injection vulnerability in user input handler found',
+      detail: 'Short',
+      suggestion: 'Fix 2',
+      lenses: ['quality'],
+    };
+    const results = [
+      makeResult('security', [highFinding]),
+      makeResult('quality', [mediumFinding]),
+    ];
+    const deduped = deduplicateFindings(results);
+    expect(deduped).toHaveLength(1);
+    // b (medium) has shorter detail — keep a's longer detail
+    expect(deduped[0].detail).toBe(highFinding.detail);
+  });
+
   it('Pass 2: does NOT merge findings on different files even with matching severity and summary', () => {
     const findingFileA = {
       id: 'p2-011',
