@@ -100,4 +100,63 @@ describe('buildImportGraph', () => {
     expect(result.filesFailed).toBe(1);
     expect(result.diagnostics.some((d) => d.level === 'error' && d.message.includes('Parse error'))).toBe(true);
   });
+
+  it('returns an error diagnostic when fetchFile throws', async () => {
+    (fetcher.fetchFile as any).mockRejectedValue(new Error('network down'));
+
+    const result = await buildImportGraph(['src/index.ts'], tree, fetcher);
+
+    expect(result.importsOut).toHaveLength(0);
+    expect(result.filesAnalyzed).toBe(0);
+    expect(result.filesFailed).toBe(1);
+    expect(
+      result.diagnostics.some(
+        (d) =>
+          d.level === 'error' &&
+          d.message.includes('Failed to fetch file src/index.ts') &&
+          d.message.includes('network down'),
+      ),
+    ).toBe(true);
+  });
+
+  it('emits a warn diagnostic and raw edge when a relative import cannot be resolved', async () => {
+    (fetcher.fetchFile as any).mockResolvedValue('import { gone } from "./missing.js";');
+    mockParseImports.mockReturnValue([
+      { module: './missing.js', symbols: ['gone'], isTypeOnly: false },
+    ]);
+    mockResolveImport.mockReturnValue(null);
+
+    const result = await buildImportGraph(['src/index.ts'], tree, fetcher);
+
+    expect(result.importsOut).toHaveLength(1);
+    expect(result.importsOut[0]).toEqual({
+      from: 'src/index.ts',
+      to: './missing.js',
+      external: false,
+      symbols: ['gone'],
+    });
+    expect(
+      result.diagnostics.some(
+        (d) => d.level === 'warn' && d.message.includes("Could not resolve import './missing.js'"),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not set edge.symbols when the import has an empty symbols array', async () => {
+    (fetcher.fetchFile as any).mockResolvedValue('import "./side-effect.js";');
+    mockParseImports.mockReturnValue([
+      { module: './side-effect.js', symbols: [], isTypeOnly: false },
+    ]);
+    mockResolveImport.mockReturnValue('src/utils.ts');
+
+    const result = await buildImportGraph(['src/index.ts'], tree, fetcher);
+
+    expect(result.importsOut).toHaveLength(1);
+    expect(result.importsOut[0]).toEqual({
+      from: 'src/index.ts',
+      to: 'src/utils.ts',
+      external: false,
+    });
+    expect(result.importsOut[0].symbols).toBeUndefined();
+  });
 });
