@@ -176,6 +176,65 @@ describe('renderScanReport', () => {
       expect(md).not.toContain('## Risk Posture');
       expect(md).not.toContain('## Findings');
     });
+
+    it('includes suppressed note when suppressedCount is set', () => {
+      const result = makeResult({
+        findings: [],
+        suppressedCount: 7,
+        stats: {
+          total: 0,
+          bySeverity: { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 },
+          byDomain: {},
+          cleanDomains: ['auth'],
+          erroredChunks: [],
+        },
+        coverage: [
+          { domain: 'auth', filesScanned: 10, findings: 0 },
+        ],
+      });
+      const md = renderScanReport(result, 'markdown');
+
+      expect(md).toContain('✅ No security issues found');
+      expect(md).toContain('7 pre-existing finding(s) suppressed by baseline');
+    });
+  });
+
+  describe('suppressed count in non-empty findings', () => {
+    it('shows suppressed count in header when suppressedCount is set', () => {
+      const result = makeResult({ suppressedCount: 3 });
+      const md = renderScanReport(result, 'markdown');
+
+      expect(md).toContain('**Suppressed by baseline:** 3');
+    });
+  });
+
+  describe('single finding per file (singular hotspot label)', () => {
+    it('uses singular "finding" when a file has exactly 1 finding', () => {
+      const findings = [
+        makeFinding({ id: 'solo-1', severity: 'MEDIUM', location: 'src/solo.ts' }),
+      ];
+      const result = makeResult({
+        findings,
+        stats: {
+          total: 1,
+          bySeverity: { CRITICAL: 0, HIGH: 0, MEDIUM: 1, LOW: 0, INFO: 0 },
+          byDomain: { general: 1 },
+          cleanDomains: [],
+          erroredChunks: [],
+        },
+        coverage: [{ domain: 'general', filesScanned: 1, findings: 1 }],
+      });
+      const md = renderScanReport(result, 'markdown');
+
+      // singular: "1 finding" not "1 findings"
+      expect(md).toMatch(/`src\/solo\.ts`\s*—\s*1 finding \(/);
+      // Only MEDIUM section exists, no CRITICAL/HIGH/LOW/INFO sections
+      expect(md).toContain('### MEDIUM');
+      expect(md).not.toContain('### CRITICAL');
+      expect(md).not.toContain('### HIGH');
+      expect(md).not.toContain('### LOW');
+      expect(md).not.toContain('### INFO');
+    });
   });
 
   describe('hotspots sorting', () => {
@@ -333,6 +392,31 @@ describe('renderScanReport', () => {
       expect(inv.properties.branch).toBe('main');
       expect(inv.properties.scannedAt).toBe('2026-05-21T07:00:00Z');
       expect(inv.properties.filesScanned).toBe(95);
+    });
+
+    it('falls back to file with line 1 when location is empty string', () => {
+      const finding = makeFinding({
+        id: 'sec-empty-loc',
+        severity: 'HIGH',
+        location: '',
+      });
+      const result = makeResult({
+        findings: [finding],
+        stats: {
+          total: 1,
+          bySeverity: { CRITICAL: 0, HIGH: 1, MEDIUM: 0, LOW: 0, INFO: 0 },
+          byDomain: { general: 1 },
+          cleanDomains: [],
+          erroredChunks: [],
+        },
+        coverage: [],
+      });
+
+      const sarif = renderScanReport(result, 'sarif');
+      const parsed = JSON.parse(sarif);
+      const loc = parsed.runs[0].results[0].locations[0].physicalLocation;
+      expect(loc.artifactLocation.uri).toBe('');
+      expect(loc.region.startLine).toBe(1);
     });
 
     it('handles empty findings list gracefully', () => {
