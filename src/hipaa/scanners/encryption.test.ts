@@ -160,6 +160,79 @@ describe('encryption scanner', () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].severity).toBe('HIGH');
     });
+
+    // ── Azure Blob Storage ──
+
+    it('flags blobClient.upload without encryption in PHI file → HIGH', () => {
+      const files = new Map([
+        ['src/patient/blob-storage.ts', `await blobClient.upload(buffer, buffer.length);`],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('HIGH');
+      expect(findings[0].scannerId).toBe('encryption');
+    });
+
+    it('allows blobClient.upload with nearby encrypt config in PHI file', () => {
+      const files = new Map([
+        ['src/patient/blob-storage.ts', [
+          'const encryptionScope = "my-phi-scope";',
+          'await blobClient.upload(buffer, buffer.length, { encryptionScope });',
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('skips blobClient.upload in non-PHI file', () => {
+      const files = new Map([
+        ['src/assets/blob-storage.ts', `await blobClient.upload(buffer, buffer.length);`],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(0);
+    });
+
+    // ── Google Cloud Storage ──
+
+    it('flags bucket.upload without encryptionKey in PHI file → HIGH', () => {
+      const files = new Map([
+        ['src/fhir/gcs-uploader.ts', `await bucket.upload(localFile, { destination: 'patients/record.json' });`],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('HIGH');
+      expect(findings[0].scannerId).toBe('encryption');
+    });
+
+    it('allows bucket.upload with encryptionKey nearby in PHI file', () => {
+      const files = new Map([
+        ['src/fhir/gcs-uploader.ts', [
+          'const encryptionKey = Buffer.from(process.env.GCS_KEY, "base64");',
+          'await bucket.upload(localFile, { destination: "patients/record.json", encryptionKey });',
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('allows bucket.upload with kmsKeyName nearby in PHI file', () => {
+      const files = new Map([
+        ['src/clinical/gcs.ts', [
+          'const kmsKeyName = "projects/my-proj/locations/global/keyRings/phi-ring/cryptoKeys/phi-key";',
+          'await bucket.upload(filePath, { kmsKeyName });',
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('skips bucket.upload in non-PHI file', () => {
+      const files = new Map([
+        ['src/assets/gcs.ts', `await bucket.upload(localFile, { destination: 'static/logo.png' });`],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(0);
+    });
   });
 
   // ── 2.3 Weak/Deprecated Cryptographic Algorithms ─────────────────
