@@ -31,7 +31,8 @@ const SOURCE_SPECIFICITY_ORDER: PhiSourceType[] = [
 
 // ─── Confidence helpers ──────────────────────────────────────────────────────
 
-function computeConfidence(
+/** @internal Exported for testing only */
+export function computeConfidence(
   edgeCount: number,
   hasTransform: boolean,
   hasDynamicChannel: boolean,

@@ -122,6 +122,15 @@ console.log(msh.sendingApp);
     const findings = scan('console.log(hl7Message);');
     expect(findings[0].regulation).toBe('45 CFR §164.312(b), §164.530(c)');
   });
+  // ── HIGH: Combined PHI + MSH segment refs in log ──────────────────────
+  it('flags log with BOTH PHI segment and MSH reference as HIGH', () => {
+    // This triggers the combined PHI_SEGMENT_RE + MSH_REF_RE branch
+    const findings = scan('console.log(pidSegment, mshHeader);');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('HIGH');
+    expect(findings[0].summary).toContain('HL7v2 PHI segment referenced in log');
+  });
+
   // ── Deterministic fields ───────────────────────────────────────────────
   it('sets deterministic=true and confidenceScore=100', () => {
     const findings = scan('console.log(hl7Message);');

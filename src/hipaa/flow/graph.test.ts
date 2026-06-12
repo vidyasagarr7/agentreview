@@ -1,7 +1,7 @@
 // ─── graph.test.ts — Tests for PHI flow graph traversal, ranking, and dedup ──
 
 import { describe, it, expect } from 'vitest';
-import { buildPhiFlowGraph } from './graph.js';
+import { buildPhiFlowGraph, computeConfidence } from './graph.js';
 import type {
   FilePhiProfile,
   FullImportGraph,
@@ -449,6 +449,13 @@ describe('buildPhiFlowGraph', () => {
     expect(safePath).toBeDefined();
     expect(safePath!.confidence).toBe('low');
     expect(safePath!.severity).toBe('INFO');
+  });
+
+  it('computeConfidence fallthrough returns medium for non-integer edge counts', () => {
+    // The fallthrough at the end of computeConfidence is defensive code:
+    // integer edge counts are fully covered by prior branches (0-2→high, 3-4→medium, 5+→low).
+    // A fractional edge count like 2.5 bypasses all three guards and hits the fallthrough.
+    expect(computeConfidence(2.5, false, false)).toBe('medium');
   });
 
   it('medium confidence + fhir-bulk source → HIGH severity override', () => {
