@@ -62,6 +62,44 @@ describe('renderEnsembleFinding', () => {
     const output = renderEnsembleFinding(mf({ severity: 'CRITICAL' }));
     expect(output).toContain('🔴');
   });
+
+  it('shows single-source indicator when agreementCount === 1 and totalModels provided', () => {
+    const finding = mf({ agreementCount: 1, modelSources: ['gpt-4o'] });
+    const output = renderEnsembleFinding(finding, 3);
+    expect(output).toContain('ℹ️');
+    expect(output).not.toContain('⚠️');
+    expect(output).not.toContain('✅');
+  });
+
+  it('shows ℹ️ when totalModels is undefined and agreementCount === 1', () => {
+    const finding = mf({ agreementCount: 1, modelSources: ['gpt-4o'] });
+    const output = renderEnsembleFinding(finding);
+    expect(output).toContain('ℹ️');
+  });
+
+  it('shows ⚠️ when totalModels is undefined and agreementCount > 1', () => {
+    const finding = mf({ agreementCount: 2 });
+    const output = renderEnsembleFinding(finding);
+    expect(output).toContain('⚠️');
+  });
+
+  it('joins multiple lenses with +', () => {
+    const finding = mf({ lenses: ['security', 'architecture'] });
+    const output = renderEnsembleFinding(finding, 2);
+    expect(output).toContain('[security + architecture]');
+  });
+
+  it('shows majority indicator when totalModels provided and agreementCount > 1 but < totalModels', () => {
+    const finding = mf({ agreementCount: 2 });
+    const output = renderEnsembleFinding(finding, 3);
+    expect(output).toContain('⚠️');
+  });
+
+  it('shows unanimous indicator when agreementCount equals totalModels', () => {
+    const finding = mf({ agreementCount: 3 });
+    const output = renderEnsembleFinding(finding, 3);
+    expect(output).toContain('✅');
+  });
 });
 
 describe('renderEnsembleReport', () => {
@@ -83,6 +121,33 @@ describe('renderEnsembleReport', () => {
     const output = renderEnsembleReport(result, 'Test', 1);
     expect(output).toContain('Unanimous');
     expect(output).toContain('Single-Source');
+  });
+
+  it('renders majority findings section when present', () => {
+    const result: EnsembleResult = {
+      ...baseResult,
+      modelResults: [
+        { label: 'gpt-4o', model: 'gpt-4o', findings: [], durationMs: 5000 },
+        { label: 'claude', model: 'claude-sonnet-4-20250514', findings: [], durationMs: 3000 },
+        { label: 'gemini', model: 'gemini-pro', findings: [], durationMs: 4000 },
+      ],
+      mergedFindings: [
+        mf({ agreementCount: 2, modelSources: ['gpt-4o', 'claude'], summary: 'Majority issue' }),
+      ],
+      stats: {
+        modelsRun: 3,
+        modelsSucceeded: 3,
+        totalRawFindings: 6,
+        mergedFindings: 1,
+        unanimousFindings: 0,
+        majorityFindings: 1,
+        singleSourceFindings: 0,
+      },
+    };
+    const output = renderEnsembleReport(result, 'Majority Test', 99);
+    expect(output).toContain('Majority Findings');
+    expect(output).toContain('Majority issue');
+    expect(output).toContain('⚠️');
   });
 
   it('shows error for failed models', () => {
