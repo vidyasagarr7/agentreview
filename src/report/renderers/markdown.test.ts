@@ -166,4 +166,66 @@ describe('renderMarkdown', () => {
     expect(output).toContain('⚠️');
     expect(output).toContain('confidence: 45%');
   });
+
+  it('shows unvalidated findings section when disposition is unvalidated and validation stats present', () => {
+    const unvalidatedFinding = {
+      ...criticalFinding,
+      disposition: 'unvalidated' as const,
+      confidenceScore: undefined,
+    };
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [unvalidatedFinding],
+      validationStats: {
+        confirmed: 0,
+        uncertain: 0,
+        disproven: 0,
+        unvalidated: 1,
+        filtered: 0,
+      },
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1 },
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Unvalidated Findings');
+    expect(output).toContain('Hardcoded AWS access key');
+    // Should NOT contain confidence tag since confidenceScore is undefined
+    expect(output).not.toContain('confidence:');
+  });
+
+  it('shows errored lens note with error icon', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      lensesRun: ['security', 'architecture'],
+      stats: {
+        ...baseReport.stats,
+        erroredLenses: ['security'],
+        cleanLenses: ['architecture'],
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('❌ This lens encountered an error and could not complete the review.');
+  });
+
+  it('shows skipped files section when skippedFiles has entries', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      skippedFiles: ['binary.jpg', 'generated.lock'],
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Skipped Files');
+    expect(output).toContain('`binary.jpg`');
+    expect(output).toContain('`generated.lock`');
+    expect(output).toContain('binary or no patch');
+  });
 });
