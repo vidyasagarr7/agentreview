@@ -124,6 +124,43 @@ describe('generateFixes', () => {
     expect(fixes[0].status).toBe('failed');
   });
 
+  it('handles finding with file not in PR files list', async () => {
+    const noMatchFinding: AgentFinding = { ...baseFinding, location: 'src/nonexistent.ts:5' };
+    const calls: string[] = [];
+    const llm = {
+      async complete(_s: string, u: string) {
+        calls.push(u);
+        return '```diff\npatch\n```\nExplanation: fix';
+      },
+    };
+
+    await generateFixes([noMatchFinding], context, llm);
+
+    // When file is not found, patch is empty, so prompt should contain '(no patch available)'
+    expect(calls[0]).toContain('(no patch available)');
+  });
+
+  it('extracts default explanation when none in LLM response', async () => {
+    const llm = {
+      async complete() {
+        return '```diff\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1 +1 @@\n-old\n+new\n```';
+      },
+    };
+
+    const fixes = await generateFixes([baseFinding], context, llm);
+
+    expect(fixes[0].explanation).toBe('Fix applied for the described issue.');
+  });
+
+  it('extracts patch from diff --git prefix (bare diff)', () => {
+    const raw = 'Some text\ndiff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new';
+    expect(extractPatch(raw)).toContain('diff --git');
+  });
+
+  it('handles unvalidated disposition', () => {
+    expect(isFixable({ ...baseFinding, disposition: 'unvalidated' })).toBe(true);
+  });
+
   it('includes finding details in the prompt', async () => {
     const calls: string[] = [];
     const llm = {

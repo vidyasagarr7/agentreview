@@ -149,6 +149,128 @@ describe('verifyFixes', () => {
     expect(results[0].issues).toContain('regression');
   });
 
+  it('parses embedded JSON object (extractJson object fallback)', async () => {
+    const llm = {
+      async complete() {
+        return 'Some preamble {"results": [{"findingId":"sec-001","passed":true,"issues":[]}]} trailing text';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(true);
+  });
+
+  it('handles completely unparseable LLM output', async () => {
+    const llm = {
+      async complete() {
+        return 'This is not JSON at all, no braces, no brackets';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    // When extractJson throws, it should be caught and mark all as failed
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(false);
+  });
+
+  it('falls through to throw when JSON has braces but no valid object', async () => {
+    const llm = {
+      async complete() {
+        // Has { but the content between braces is not valid JSON
+        // and no [ ] either — forces the objStart path to try and fail
+        return 'text with { broken json but } no array';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(false);
+  });
+
+  it('filters out malformed records missing findingId or passed', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify([
+          { findingId: 'sec-001', passed: true, issues: [] },
+          { findingId: 123, passed: true, issues: [] },  // findingId not a string
+          { passed: true, issues: [] },  // missing findingId
+          { findingId: 'sec-003', issues: [] },  // missing passed
+          null,  // null entry
+        ]);
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001'), makeFix('sec-002')], context, llm);
+
+    // Only sec-001 has a valid entry; sec-002 should be marked missing
+    expect(results).toHaveLength(2);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(true);
+    expect(results[1].findingId).toBe('sec-002');
+    expect(results[1].passed).toBe(false);
+  });
+
+  it('filters non-string values from issues array', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify([
+          { findingId: 'sec-001', passed: false, issues: ['real issue', 42, null, 'another issue'] },
+        ]);
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results[0].issues).toEqual(['real issue', 'another issue']);
+  });
+
+  it('handles non-array issues field', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify([
+          { findingId: 'sec-001', passed: false, issues: 'not an array' },
+        ]);
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results[0].issues).toEqual([]);
+  });
+
+  it('returns empty results when LLM returns an object without results array', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify({ status: 'ok', message: 'no results key here' });
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    // Object without .results array → falls to empty records → fix marked missing
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(false);
+    expect(results[0].issues[0]).toContain('missing');
+  });
+
+  it('includes pending fixes as applicable', async () => {
+    const llm = {
+      async complete() {
+        return JSON.stringify([{ findingId: 'sec-001', passed: true, issues: [] }]);
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001', 'pending')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].passed).toBe(true);
+  });
+
   it('marks a fix as missing when the LLM omits its findingId entry', async () => {
     const llm = {
       async complete() {

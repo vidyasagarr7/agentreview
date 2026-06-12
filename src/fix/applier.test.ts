@@ -41,6 +41,27 @@ describe('applyPatch', () => {
 
     expect(result).toBe(false);
   });
+
+  it('returns false when writeFile throws', async () => {
+    const mockWriteFile = vi.mocked(writeFile);
+    mockWriteFile.mockRejectedValueOnce(new Error('ENOSPC: no space left'));
+
+    const result = await applyPatch('--- a/f\n+++ b/f\n', '/tmp/repo');
+
+    expect(result).toBe(false);
+  });
+
+  it('handles unlink failure in finally block gracefully', async () => {
+    const mockUnlink = vi.mocked(unlink);
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      (cb as (err: Error | null) => void)(null);
+      return undefined as never;
+    });
+    mockUnlink.mockRejectedValueOnce(new Error('ENOENT'));
+
+    const result = await applyPatch('--- a/f\n+++ b/f\n', '/tmp/repo');
+    expect(result).toBe(true);
+  });
 });
 
 describe('revertPatch', () => {
@@ -65,5 +86,27 @@ describe('revertPatch', () => {
     const result = await revertPatch('bad', '/tmp/repo');
 
     expect(result).toBe(false);
+  });
+
+  it('returns false when writeFile throws', async () => {
+    const mockWriteFile = vi.mocked(writeFile);
+    mockWriteFile.mockRejectedValueOnce(new Error('EACCES: permission denied'));
+
+    const result = await revertPatch('--- a/f\n+++ b/f\n', '/tmp/repo');
+
+    expect(result).toBe(false);
+  });
+
+  it('handles unlink failure in finally block gracefully', async () => {
+    const mockUnlink = vi.mocked(unlink);
+    mockExecFile.mockImplementation((_cmd, args, _opts, cb) => {
+      expect((args as string[]).includes('--reverse')).toBe(true);
+      (cb as (err: Error | null) => void)(null);
+      return undefined as never;
+    });
+    mockUnlink.mockRejectedValueOnce(new Error('ENOENT'));
+
+    const result = await revertPatch('--- a/f\n+++ b/f\n', '/tmp/repo');
+    expect(result).toBe(true);
   });
 });
