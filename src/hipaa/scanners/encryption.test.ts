@@ -416,4 +416,98 @@ describe('encryption scanner', () => {
       expect(findings[0].severity).toBe('HIGH');
     });
   });
+
+  // ── 2.6 Azure Blob Upload Without Encryption ──────────────────────
+
+  describe('Azure Blob upload encryption', () => {
+    it('flags blobClient.upload without encrypt nearby in PHI file → HIGH', () => {
+      const files = new Map([
+        ['src/patient/azure-upload.ts', [
+          `const data = getPatientData();`,
+          `await blobClient.upload(data, data.length);`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('HIGH');
+      expect(findings[0].category).toBe('Unencrypted Cloud Storage');
+      expect(findings[0].summary).toContain('Azure');
+    });
+
+    it('allows blobClient.upload with encryptionScope nearby in PHI file', () => {
+      const files = new Map([
+        ['src/patient/azure-upload.ts', [
+          `const options = { encryptionScope: 'phi-scope' };`,
+          `await blobClient.upload(data, data.length, options);`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      const azureFindings = findings.filter(f => f.summary.includes('Azure'));
+      expect(azureFindings).toHaveLength(0);
+    });
+
+    it('skips blobClient.upload in non-PHI file', () => {
+      const files = new Map([
+        ['src/assets/azure-upload.ts', [
+          `await blobClient.upload(data, data.length);`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      const azureFindings = findings.filter(f => f.summary.includes('Azure'));
+      expect(azureFindings).toHaveLength(0);
+    });
+  });
+
+  // ── 2.7 GCS Upload Without Encryption ─────────────────────────────
+
+  describe('GCS upload encryption', () => {
+    it('flags bucket.upload without encryptionKey/kmsKeyName nearby in PHI file → HIGH', () => {
+      const files = new Map([
+        ['src/hipaa/gcs-upload.ts', [
+          `const bucket = storage.bucket('phi-records');`,
+          `await bucket.upload('./patient-data.csv');`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('HIGH');
+      expect(findings[0].category).toBe('Unencrypted Cloud Storage');
+      expect(findings[0].summary).toContain('GCS');
+    });
+
+    it('allows bucket.upload with encryptionKey nearby in PHI file', () => {
+      const files = new Map([
+        ['src/hipaa/gcs-upload.ts', [
+          `const opts = { encryptionKey: Buffer.from(key) };`,
+          `await bucket.upload('./patient-data.csv', opts);`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      const gcsFindings = findings.filter(f => f.summary.includes('GCS'));
+      expect(gcsFindings).toHaveLength(0);
+    });
+
+    it('allows bucket.upload with kmsKeyName nearby in PHI file', () => {
+      const files = new Map([
+        ['src/hipaa/gcs-upload.ts', [
+          `const opts = { kmsKeyName: 'projects/my-project/locations/us/keyRings/ring/cryptoKeys/key' };`,
+          `await bucket.upload('./patient-data.csv', opts);`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      const gcsFindings = findings.filter(f => f.summary.includes('GCS'));
+      expect(gcsFindings).toHaveLength(0);
+    });
+
+    it('skips bucket.upload in non-PHI file', () => {
+      const files = new Map([
+        ['src/assets/gcs-upload.ts', [
+          `await bucket.upload('./logo.png');`,
+        ].join('\n')],
+      ]);
+      const findings = encryptionScanner.scan(files, options);
+      const gcsFindings = findings.filter(f => f.summary.includes('GCS'));
+      expect(gcsFindings).toHaveLength(0);
+    });
+  });
 });
