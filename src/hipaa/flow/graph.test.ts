@@ -381,6 +381,76 @@ describe('buildPhiFlowGraph', () => {
     expect(paths[0].severity).toBe('CRITICAL');
   });
 
+  it('low confidence (dynamic channel) → LOW severity', () => {
+    // Dynamic event channel forces hasDynamicChannel=true → low confidence.
+    // No safe patterns → falls through to the switch's `case low` → LOW.
+    const profiles = new Map<string, FilePhiProfile>();
+    profiles.set('src/emitter.ts', emptyProfile({
+      sources: [{ name: 'loadPatient', line: 10, type: 'fhir-read' }],
+      runtimeFlows: [{
+        type: 'event-emit',
+        channel: '<dynamic>',
+        functionName: 'emitPatient',
+        line: 15,
+      }],
+    }));
+    profiles.set('src/listener.ts', emptyProfile({
+      sinks: [{ name: 'logger.info', line: 20, type: 'log' }],
+      runtimeFlows: [{
+        type: 'event-listen',
+        channel: '<dynamic>',
+        functionName: 'handlePatient',
+        line: 5,
+      }],
+    }));
+
+    const graph = makeImportGraph(new Map(), new Map());
+    const paths = buildPhiFlowGraph(profiles, graph, opts());
+
+    const dynamicPath = paths.find(
+      (p) => p.source.file === 'src/emitter.ts' && p.sink.file === 'src/listener.ts',
+    );
+    expect(dynamicPath).toBeDefined();
+    expect(dynamicPath!.confidence).toBe('low');
+    expect(dynamicPath!.severity).toBe('LOW');
+  });
+
+  it('low confidence + safe pattern match → INFO severity', () => {
+    // Same dynamic-channel flow (low confidence), but a safe pattern of
+    // type expected-sink matches the sink name via regex → INFO override.
+    const profiles = new Map<string, FilePhiProfile>();
+    profiles.set('src/emitter.ts', emptyProfile({
+      sources: [{ name: 'loadPatient', line: 10, type: 'fhir-read' }],
+      runtimeFlows: [{
+        type: 'event-emit',
+        channel: '<unknown>',
+        functionName: 'emitPatient',
+        line: 15,
+      }],
+    }));
+    profiles.set('src/listener.ts', emptyProfile({
+      sinks: [{ name: 'logger.info', line: 20, type: 'log' }],
+      runtimeFlows: [{
+        type: 'event-listen',
+        channel: '<unknown>',
+        functionName: 'handlePatient',
+        line: 5,
+      }],
+    }));
+
+    const graph = makeImportGraph(new Map(), new Map());
+    const paths = buildPhiFlowGraph(profiles, graph, opts({
+      safePatterns: [{ pattern: 'logger.*', type: 'expected-sink' }],
+    }));
+
+    const safePath = paths.find(
+      (p) => p.source.file === 'src/emitter.ts' && p.sink.file === 'src/listener.ts',
+    );
+    expect(safePath).toBeDefined();
+    expect(safePath!.confidence).toBe('low');
+    expect(safePath!.severity).toBe('INFO');
+  });
+
   it('medium confidence + fhir-bulk source → HIGH severity override', () => {
     const profiles = new Map<string, FilePhiProfile>();
     profiles.set('src/bulk.ts', emptyProfile({
