@@ -732,6 +732,78 @@ describe('scanCodebase', () => {
     expect(cleanupFn).toHaveBeenCalled();
   });
 
+  it('GitHub clone with undefined rootReal skips repo config loading (configRoot falsy)', async () => {
+    // When cloneRepo returns a reader without rootReal, clonedRepoRoot is undefined,
+    // so configRoot is undefined and both `if (configRoot)` blocks take the false branch.
+    const cleanupFn = vi.fn(async () => {});
+    mockCloneRepo.mockResolvedValueOnce({
+      reader: {
+        // rootReal intentionally omitted → undefined
+        listFiles: vi.fn(async () => [{ path: 'src/app.ts', size: 20, priority: 0 }]),
+        readFile: vi.fn(async (p: string) => (p === 'src/app.ts' ? 'export const x = 1;' : null)),
+        cleanup: cleanupFn,
+      },
+      cleanup: cleanupFn,
+    });
+
+    const llm = makeMockLLM(() => '[]');
+    const options = defaultOptions();
+
+    const result = await scanCodebase(
+      'https://github.com/test/repo',
+      options,
+      llm as any,
+      {},
+    );
+
+    // Scan completes without loading repo config — no HIPAA chunks present.
+    expect(result).toBeDefined();
+    expect(result.chunks.find((c) => c.chunkId === 'deterministic')).toBeUndefined();
+    expect(result.chunks.find((c) => c.chunkId === 'phi-flow-analysis')).toBeUndefined();
+    expect(cleanupFn).toHaveBeenCalled();
+  });
+
+  it('HIPAA fileContentMap skips files whose readFile returns null', async () => {
+    // HIPAA config lives in the cloned root (tmpDir). One discovered file returns
+    // null from readFile, exercising the false branch of `if (content !== null)`.
+    writeTestFiles({
+      '.agentreview.yml': 'hipaa:\n  flow-analysis: false\n  scanners:\n    select-star: true\n',
+    });
+
+    const cleanupFn = vi.fn(async () => {});
+    const readFile = vi.fn(async (p: string) => {
+      if (p === 'src/present.ts') return 'export function getPatient() { return db.query("SELECT * FROM patients"); }';
+      // src/missing.ts is discovered (via listFiles) but unreadable → null
+      return null;
+    });
+    mockCloneRepo.mockResolvedValueOnce({
+      reader: {
+        rootReal: tmpDir,
+        listFiles: vi.fn(async () => [
+          { path: 'src/present.ts', size: 60, priority: 0 },
+          { path: 'src/missing.ts', size: 10, priority: 0 },
+        ]),
+        readFile,
+        cleanup: cleanupFn,
+      },
+      cleanup: cleanupFn,
+    });
+
+    const llm = makeMockLLM(() => '[]');
+    const options = defaultOptions();
+
+    const result = await scanCodebase(
+      'https://github.com/test/repo',
+      options,
+      llm as any,
+      {},
+    );
+
+    expect(result).toBeDefined();
+    // missing.ts was read and returned null — the loop continued without throwing.
+    expect(readFile).toHaveBeenCalledWith('src/missing.ts');
+  });
+
   it('custom branch is used in result', async () => {
     writeTestFiles({
       'src/app.ts': 'export const x = 1;',
