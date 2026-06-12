@@ -285,6 +285,41 @@ describe('distillTrace', () => {
     expect(result).not.toContain('init');
   });
 
+  it('uses singular form when a tool appears exactly once in exploration summary', () => {
+    // Covers the `n !== 1 ? 's' : ''` branch where n === 1 (singular)
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'x'.repeat(200000) },
+    ];
+    // 5 Reads + 1 Grep + 1 Bash (7 total ≥ EXPLORATION_RUN_MIN=6)
+    // Read appears 5 times (plural), Grep and Bash appear once each (singular)
+    for (let i = 0; i < 5; i++) {
+      events.push({
+        type: 'assistant', timestamp: '', uuid: `r${i}`,
+        toolCalls: [{ name: 'Read', input: { file_path: `file${i}.ts` } }],
+      });
+    }
+    events.push({
+      type: 'assistant', timestamp: '', uuid: 'g0',
+      toolCalls: [{ name: 'Grep', input: { pattern: 'TODO', path: 'src/' } }],
+    });
+    events.push({
+      type: 'assistant', timestamp: '', uuid: 'b0',
+      toolCalls: [{ name: 'Bash', input: { command: 'echo hi' } }],
+    });
+    events.push({ type: 'user', timestamp: '', uuid: 'u2', text: 'done' });
+    const session = makeSession(events);
+    const result = distillTrace(session);
+    expect(result).toContain('[exploration:');
+    // plural for reads (5)
+    expect(result).toContain('5 reads');
+    // singular for grep (1) and bash (1)
+    expect(result).toContain('1 grep');
+    expect(result).toContain('1 bash');
+    // must NOT add spurious 's'
+    expect(result).not.toContain('1 bashs');
+    expect(result).not.toContain('1 greps');
+  });
+
   it('keeps short tool-only runs (< 6) without collapsing to exploration summary', () => {
     const events: TraceEvent[] = [
       { type: 'user', timestamp: '', uuid: 'u1', text: 'x'.repeat(200000) },
