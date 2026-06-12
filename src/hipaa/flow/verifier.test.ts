@@ -200,4 +200,64 @@ describe('verifyPaths', () => {
     expect(results).toHaveLength(0);
     expect(llm.chat).not.toHaveBeenCalled();
   });
+
+  it('upgrades confidence when verifier returns higher confidence than heuristic', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'high',
+        explanation: 'Confirmed PHI leak with high confidence',
+        baaRelevant: false,
+      }),
+    ]);
+
+    const path = makePath({ confidence: 'low', severity: 'HIGH' });
+    const results = await verifyPaths([path], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].confidence).toBe('high'); // upgraded from 'low'
+    expect(results[0].verifierConfidence).toBe('high');
+  });
+
+  it('upgrades MEDIUM severity to HIGH when verifier confirms leak with high confidence', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'high',
+        explanation: 'PHI is clearly leaked without safeguards',
+        baaRelevant: false,
+      }),
+    ]);
+
+    const path = makePath({ severity: 'MEDIUM' });
+    const results = await verifyPaths([path], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].severity).toBe('HIGH'); // MEDIUM → HIGH
+  });
+
+  it('escalates severity via SEVERITY_UP for external sink without BAA (non-HIGH base)', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'medium',
+        explanation: 'PHI sent to analytics without BAA',
+        baaRelevant: true,
+      }),
+    ]);
+
+    const path = makePath({
+      sink: { file: 'src/analytics/mixpanel.ts', name: 'https://api.mixpanel.com/track', line: 8, type: 'analytics' },
+      severity: 'LOW',
+      confidence: 'medium',
+    });
+
+    const results = await verifyPaths([path], makeFileContents({
+      'src/analytics/mixpanel.ts': 'mixpanel.track("event", { patientId });',
+    }), llm, defaultBaaRegistry);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].severity).toBe('MEDIUM'); // LOW → MEDIUM via SEVERITY_UP
+    expect(results[0].baaStatus).toBe('no-baa');
+  });
 });
