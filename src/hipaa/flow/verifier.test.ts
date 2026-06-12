@@ -200,4 +200,48 @@ describe('verifyPaths', () => {
     expect(results).toHaveLength(0);
     expect(llm.chat).not.toHaveBeenCalled();
   });
+
+  it('skips path when both initial and retry LLM responses fail validation', async () => {
+    const badResponse = '{ "not": "valid" }';
+    const llm = makeLlm([badResponse, badResponse]);
+
+    const results = await verifyPaths([makePath()], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(0);
+    expect(llm.chat).toHaveBeenCalledTimes(2); // initial + retry
+  });
+
+  it('upgrades confidence when verifier is more confident than heuristic', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'high',
+        explanation: 'PHI clearly leaked — verifier is more confident than heuristic',
+        baaRelevant: false,
+      }),
+    ]);
+
+    const path = makePath({ confidence: 'low' });
+    const results = await verifyPaths([path], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].confidence).toBe('high');
+  });
+
+  it('upgrades MEDIUM severity to HIGH when verifier confirms with high confidence', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'high',
+        explanation: 'Verifier confirmed high-confidence MEDIUM leak — upgraded to HIGH',
+        baaRelevant: false,
+      }),
+    ]);
+
+    const path = makePath({ severity: 'MEDIUM' });
+    const results = await verifyPaths([path], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].severity).toBe('HIGH');
+  });
 });
