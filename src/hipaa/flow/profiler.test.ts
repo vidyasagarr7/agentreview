@@ -104,6 +104,23 @@ describe('profileFile timeout', () => {
     await vi.advanceTimersByTimeAsync(1_001);
     await assertion;
   });
+
+  it('propagates inner promise rejection without waiting for timeout', async () => {
+    // Real timers here: we are exercising the rejection path in withTimeout,
+    // not the timeout path. The inner promise rejects, so clearTimeout fires
+    // and the rejection propagates immediately.
+    vi.useRealTimers();
+
+    const llm: LLMClient = {
+      chat: vi.fn(async () => {
+        throw new Error('LLM network error');
+      }),
+    };
+
+    await expect(profileFile('src/net.ts', 'const x = 1;', llm, 30_000)).rejects.toThrow(
+      'LLM network error',
+    );
+  });
 });
 
 // ─── profileFiles Tests ───────────────────────────────────────────────────────
@@ -214,5 +231,29 @@ describe('profileFiles', () => {
     expect(results.size).toBeLessThan(files.length);
     expect(results.has('src/bad.ts')).toBe(false);
     expect(results.has('src/good1.ts')).toBe(true);
+  });
+
+  it('counts throws from profileFile as failures', async () => {
+    // An LLM whose chat always throws makes profileFile reject, exercising the
+    // catch block in profileFiles that counts the throw as a failure rather
+    // than letting it escape.
+    const files = [
+      { path: 'src/a.ts', content: 'const a = 1;' },
+      { path: 'src/b.ts', content: 'const b = 2;' },
+      { path: 'src/c.ts', content: 'const c = 3;' },
+    ];
+    const llm: LLMClient = {
+      chat: vi.fn(async () => {
+        throw new Error('network failure');
+      }),
+    };
+
+    const results = await profileFiles(files, llm, {
+      concurrency: 2,
+      maxFiles: 100,
+    });
+
+    // Every file threw, so none made it into results.
+    expect(results.size).toBe(0);
   });
 });
