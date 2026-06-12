@@ -69,6 +69,20 @@ describe('formatInlineComment', () => {
     const result = formatInlineComment(multi);
     expect(result).toContain('[security + quality]');
   });
+
+  it('handles empty lenses array with unknown fallback', () => {
+    const noLens = { ...finding, lenses: [] as string[] };
+    const result = formatInlineComment(noLens);
+    expect(result).toContain('*AgentReview [unknown]*');
+  });
+
+  it('omits suggestion when not provided', () => {
+    const { suggestion: _, ...rest } = finding;
+    const noSuggestion = rest as typeof finding;
+    const result = formatInlineComment(noSuggestion);
+    expect(result).not.toContain('**Suggestion:**');
+    expect(result).toContain('*AgentReview [security]*');
+  });
 });
 
 describe('mapFindingsToInlineComments', () => {
