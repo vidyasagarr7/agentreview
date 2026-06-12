@@ -148,4 +148,28 @@ describe('renderSarif', () => {
     expect(loc.artifactLocation.uri).toBe('README.md');
     expect(loc.region.startLine).toBe(1);
   });
+
+  it('deduplicates rules when multiple findings share the same id', () => {
+    const findings = [
+      { ...finding, id: 'SEC-001', summary: 'First occurrence' },
+      { ...finding, id: 'SEC-001', summary: 'Duplicate occurrence' },
+      { ...finding, id: 'SEC-002', summary: 'Different rule' },
+    ];
+    const report = { ...baseReport, findings };
+    const output = JSON.parse(renderSarif(report));
+    const rules = output.runs[0].tool.driver.rules;
+    // Should have 2 unique rules, not 3
+    expect(rules).toHaveLength(2);
+    expect(rules[0].id).toBe('SEC-001');
+    expect(rules[0].shortDescription.text).toBe('First occurrence');
+    expect(rules[1].id).toBe('SEC-002');
+    // But results should still have all 3 findings
+    expect(output.runs[0].results).toHaveLength(3);
+  });
+});
+
+describe('parseLocation edge cases', () => {
+  it('returns fallback for empty string (no regex match)', () => {
+    expect(parseLocation('')).toEqual({ file: '', line: 1 });
+  });
 });
