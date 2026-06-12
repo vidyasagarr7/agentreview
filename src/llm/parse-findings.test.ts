@@ -93,4 +93,20 @@ describe('parseFindings', () => {
     expect((result as ParseError).type).toBe('ParseError');
     expect((result as ParseError).message).toContain('[PARSE ERROR]');
   });
+
+  it('handles escaped quotes inside JSON strings (escape branch)', () => {
+    const raw = 'Here are findings:\n[{"id":"f1","severity":"HIGH","category":"Test","location":"foo.ts:1","summary":"Has \\"quoted\\" term","detail":"detail","suggestion":"fix"}]';
+    const result = parseFindings(raw, 'security');
+    expect(Array.isArray(result)).toBe(true);
+    expect((result as AgentFinding[]).length).toBe(1);
+    expect((result as AgentFinding[])[0].summary).toContain('quoted');
+  });
+
+  it('returns ParseError when bracket is unclosed (no matching ])', () => {
+    const raw = 'Some text with [unclosed bracket without closing';
+    const result = parseFindings(raw, 'test-lens');
+    expect(Array.isArray(result)).toBe(false);
+    expect((result as ParseError).type).toBe('ParseError');
+    expect((result as ParseError).lensId).toBe('test-lens');
+  });
 });
