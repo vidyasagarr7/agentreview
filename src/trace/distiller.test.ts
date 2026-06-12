@@ -301,4 +301,180 @@ describe('distillTrace', () => {
     expect(result).not.toContain('[exploration:');
     expect(result).toContain('Read file0.ts');
   });
+
+  // --- Branch coverage additions ---
+
+  it('uses singular form when a tool appears exactly once in exploration', () => {
+    // 6 tool calls: 5 Reads + 1 Grep → triggers exploration collapse
+    // Grep count = 1 → singular (no trailing 's')
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'x'.repeat(200000) },
+    ];
+    for (let i = 0; i < 5; i++) {
+      events.push({
+        type: 'assistant', timestamp: '', uuid: `a${i}`,
+        toolCalls: [{ name: 'Read', input: { file_path: `f${i}.ts` } }],
+      });
+    }
+    events.push({
+      type: 'assistant', timestamp: '', uuid: 'a5',
+      toolCalls: [{ name: 'Grep', input: { pattern: 'x', path: 'src/' } }],
+    });
+    events.push({ type: 'user', timestamp: '', uuid: 'u2', text: 'done' });
+    const session = makeSession(events);
+    const result = distillTrace(session);
+    expect(result).toContain('[exploration:');
+    // "5 reads" (plural) and "1 grep" (singular — no trailing s)
+    expect(result).toContain('5 reads');
+    expect(result).toMatch(/1 grep(?!s)/);
+  });
+
+  it('truncateMiddle returns all lines when head+tail cover everything (elided <= 0)', () => {
+    // HARD_CAP = 200000 tokens, targetChars = 200000/0.4 = 500000
+    // headBudget = max(250000, lines[0].length+1), tailBudget = max(250000, lines[last].length+1)
+    // We need total estimateTokens > HARD_CAP to trigger truncateMiddle,
+    // but few enough short middle lines that head+tail cover them all.
+    // Strategy: 3 lines where line[0] is huge (>500K chars to exceed hard cap)
+    // but line[1] is short. headBudget = max(250000, len(line[0])+1) = huge.
+    // So head will grab line[0] and line[1]. tail grabs line[2].
+    // elided = 3 - 2 - 1 = 0 → hits the elided <= 0 branch!
+    const bigText = 'a'.repeat(510000); // > 500K chars → exceeds hard cap
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: bigText },
+      { type: 'user', timestamp: '', uuid: 'u2', text: 'middle line' },
+      { type: 'user', timestamp: '', uuid: 'u3', text: 'end line' },
+    ];
+    const session = makeSession(events);
+    const result = distillTrace(session);
+    // All 3 lines should be present, no elision marker
+    expect(result).not.toContain('[… elided');
+    expect(result).toContain('USER: middle line');
+    expect(result).toContain('USER: end line');
+  });
+
+  it('skips user events with no text', () => {
+    const session = makeSession([
+      { type: 'user', timestamp: '', uuid: 'u1', text: '' },
+      { type: 'user', timestamp: '', uuid: 'u2', text: 'hello' },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toBe('USER: hello');
+  });
+
+  it('skips assistant events with no text and no toolCalls', () => {
+    const session = makeSession([
+      { type: 'assistant', timestamp: '', uuid: 'a1' } as TraceEvent,
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'hello' },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toBe('USER: hello');
+  });
+
+  it('renders Bash with no result (no status indicator)', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Bash', input: { command: 'echo test' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toBe('Bash: echo test');
+    expect(result).not.toContain('→');
+  });
+
+  it('renders Bash OK status when result is not an error', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{
+          name: 'Bash',
+          input: { command: 'echo hi' },
+          result: { content: 'hi', isError: false },
+        }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('→ OK');
+  });
+
+  it('renders Grep with query field (fallback from pattern)', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Grep', input: { query: 'findme' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Grep "findme"');
+    // no path
+    expect(result).not.toContain(' in ');
+  });
+
+  it('renders Glob tool calls with pattern', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Glob', input: { pattern: '**/*.ts' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Glob "**/*.ts"');
+  });
+
+  it('renders Replace tool like Write/Edit with path and size', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Replace', input: { file_path: 'src/x.ts', content: 'abc' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Replace src/x.ts');
+    expect(result).toContain('KB)');
+  });
+
+  it('handles Write with missing content (0.0KB)', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Write', input: { file_path: 'foo.ts' } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Write foo.ts (0.0KB)');
+  });
+
+  it('handles Bash with non-string command', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Bash', input: { command: 123 } }],
+      },
+    ]);
+    const result = distillTrace(session);
+    // cmd is '' (empty trim), so result is 'Bash: ' with trailing space
+    expect(result).toBe('Bash: ');
+  });
+
+  it('handles tool call with no input', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Bash' } as any],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Bash:');
+  });
+
+  it('handles Task with no description', () => {
+    const session = makeSession([
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{ name: 'Task', input: {} }],
+      },
+    ]);
+    const result = distillTrace(session);
+    expect(result).toContain('Subagent:');
+  });
 });
