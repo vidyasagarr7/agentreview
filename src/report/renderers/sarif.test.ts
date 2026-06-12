@@ -66,6 +66,10 @@ describe('parseLocation', () => {
   it('handles file without line number', () => {
     expect(parseLocation('src/auth.ts')).toEqual({ file: 'src/auth.ts', line: 1 });
   });
+  it('handles empty location string', () => {
+    expect(parseLocation('')).toEqual({ file: '', line: 1 });
+  });
+
   it('handles deeply nested paths', () => {
     expect(parseLocation('src/a/b/c.ts:100')).toEqual({ file: 'src/a/b/c.ts', line: 100 });
   });
@@ -147,5 +151,16 @@ describe('renderSarif', () => {
     const loc = output.runs[0].results[0].locations[0].physicalLocation;
     expect(loc.artifactLocation.uri).toBe('README.md');
     expect(loc.region.startLine).toBe(1);
+  });
+
+  it('deduplicates rules when multiple findings share the same id', () => {
+    const dup1 = { ...finding, id: 'DUP-001', summary: 'First occurrence' };
+    const dup2 = { ...finding, id: 'DUP-001', summary: 'Second occurrence' };
+    const report = { ...baseReport, findings: [dup1, dup2] };
+    const output = JSON.parse(renderSarif(report));
+    // Two results (one per finding) but only ONE rule (deduped by id)
+    expect(output.runs[0].results).toHaveLength(2);
+    expect(output.runs[0].tool.driver.rules).toHaveLength(1);
+    expect(output.runs[0].tool.driver.rules[0].shortDescription.text).toBe('First occurrence');
   });
 });
