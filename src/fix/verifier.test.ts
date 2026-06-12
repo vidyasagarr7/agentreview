@@ -132,6 +132,40 @@ describe('verifyFixes', () => {
     expect(results[0].issues).toEqual([]);
   });
 
+  it('extracts an embedded object when no JSON array is present (extractJson object fallback)', async () => {
+    const llm = {
+      async complete() {
+        // Prose with an embedded JSON object and no array brackets, so extractJson
+        // falls through the array branch and recovers the object instead.
+        return 'The verification result: {"findingId":"sec-001","passed":true} (done)';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    // The recovered object is a bare record, not the array/{results:[...]} shape
+    // parseVerifyResponse understands, so the fix is reported as missing rather than crashing.
+    expect(results).toHaveLength(1);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(false);
+    expect(results[0].issues[0]).toContain('missing');
+  });
+
+  it('marks the fix as failed when the response has no JSON to extract (extractJson throw)', async () => {
+    const llm = {
+      async complete() {
+        return 'completely invalid text';
+      },
+    };
+
+    const results = await verifyFixes([makeFix('sec-001')], context, llm);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].findingId).toBe('sec-001');
+    expect(results[0].passed).toBe(false);
+    expect(results[0].issues[0]).toContain('failed');
+  });
+
   it('parses the wrapped {results:[...]} format', async () => {
     const llm = {
       async complete() {
