@@ -53,6 +53,12 @@ vi.mock('fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../scan/local-reader.js', () => {
+  const LocalSourceReader = vi.fn();
+  LocalSourceReader.prototype.listFiles = vi.fn().mockResolvedValue([]);
+  return { LocalSourceReader };
+});
+
 // ── Import mocked modules ──────────────────────────────────────────────────
 
 import { ConfigManager } from '../config.js';
@@ -60,6 +66,7 @@ import { checkScanDisclosure } from '../disclosure.js';
 import { scanCodebase } from '../../scan/orchestrator.js';
 import { renderScanReport } from '../../scan/renderer.js';
 import { writeFile, mkdir } from 'fs/promises';
+import { LocalSourceReader } from '../../scan/local-reader.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -548,5 +555,32 @@ describe('runScan (via parseAsync)', () => {
     expect(calls.some((c: unknown) => typeof c === 'string' && c.includes('Unexpected error'))).toBe(true);
     // Stack trace is logged when verbose
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error: boom'));
+  });
+
+  it('--max-files and --budget parseInt parsers are applied', async () => {
+    setupMocks();
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', '/tmp/mycode', '--yes', '--max-files', '25', '--budget', '50000']);
+    expect(vi.mocked(scanCodebase)).toHaveBeenCalledWith(
+      '/tmp/mycode',
+      expect.objectContaining({ maxFiles: 25, budgetTokens: 50000 }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('local target: LocalSourceReader.listFiles() success path updates preFileCount', async () => {
+    setupMocks();
+    vi.mocked(LocalSourceReader.prototype.listFiles).mockResolvedValue(
+      ['file1.ts', 'file2.ts', 'file3.ts'] as any,
+    );
+    const cmd = createScanCommand();
+    await cmd.parseAsync(['node', 'test', '/tmp/mycode', '--yes']);
+    // Disclosure was called — the file count flows through to checkScanDisclosure
+    expect(vi.mocked(checkScanDisclosure)).toHaveBeenCalledWith(
+      expect.anything(),
+      true,
+      expect.objectContaining({ fileCount: 3 }),
+    );
   });
 });
