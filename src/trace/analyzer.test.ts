@@ -247,6 +247,57 @@ describe('analyzeTrace', () => {
     expect(retries[0].evidence).toContain('TodoWrite');
   });
 
+  it('does NOT flag unhandled_error when same file is edited after error (Write)', () => {
+    const events: TraceEvent[] = [
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [{
+          name: 'Bash', input: { command: 'npm test', file_path: 'src/broken.ts' },
+          result: { content: 'SyntaxError in broken.ts', isError: true },
+        }],
+      },
+      {
+        type: 'assistant', timestamp: '', uuid: 'a2',
+        toolCalls: [{
+          name: 'Write', input: { file_path: 'src/broken.ts', content: 'fixed code' },
+        }],
+      },
+    ];
+    const findings = analyzeTrace(makeSession(events));
+    const unhandled = findings.filter(f => f.signal === 'unhandled_error');
+    expect(unhandled).toHaveLength(0);
+  });
+
+  it('sorts mixed warning and info findings with warnings first (covers sort comparator)', () => {
+    // Scenario: 1 user prompt + 3 identical no-error retries + extra tool calls
+    // retry_storm (warning): 3 identical consecutive Bash calls
+    // low_exploration (info): 1 user prompt, >5 tool calls, no errors
+    const events: TraceEvent[] = [
+      { type: 'user', timestamp: '', uuid: 'u1', text: 'build it' },
+      {
+        type: 'assistant', timestamp: '', uuid: 'a1',
+        toolCalls: [
+          { name: 'Bash', input: { command: 'make build' } },
+          { name: 'Bash', input: { command: 'make build' } },
+          { name: 'Bash', input: { command: 'make build' } },
+          { name: 'Read', input: { file_path: 'a.ts' } },
+          { name: 'Read', input: { file_path: 'b.ts' } },
+          { name: 'Write', input: { file_path: 'c.ts', content: '...' } },
+        ],
+      },
+    ];
+    const findings = analyzeTrace(makeSession(events));
+    const warnings = findings.filter(f => f.severity === 'warning');
+    const infos = findings.filter(f => f.severity === 'info');
+    // Must have both severities to exercise the sort comparator
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(infos.length).toBeGreaterThan(0);
+    // All warnings must appear before all infos
+    const lastWarningIdx = findings.lastIndexOf(warnings[warnings.length - 1]);
+    const firstInfoIdx = findings.indexOf(infos[0]);
+    expect(lastWarningIdx).toBeLessThan(firstInfoIdx);
+  });
+
   it('does NOT flag low exploration when errors are present', () => {
     const events: TraceEvent[] = [
       { type: 'user', timestamp: '', uuid: 'u1', text: 'build feature X' },

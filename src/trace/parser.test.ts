@@ -506,6 +506,109 @@ describe('parseTrace — core parsing', () => {
     expect(session.warnings).toBe(2);
   });
 
+  it('handles assistant message with non-array content (string) → empty toolCalls/text', () => {
+    const input = jsonl({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: '2025-01-01T00:00:00Z',
+      message: {
+        role: 'assistant',
+        model: 'claude-sonnet-4',
+        content: 'I am a plain string, not an array',
+      },
+    });
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(1);
+    const ev = session.events[0];
+    expect(ev.type).toBe('assistant');
+    // extractAssistantBlocks receives [] → no text, no toolCalls
+    expect(ev.text).toBeUndefined();
+    expect(ev.toolCalls).toBeUndefined();
+    expect(session.model).toBe('claude-sonnet-4');
+  });
+
+  it('skips pendingToolCalls registration when tool call has no id', () => {
+    const input = jsonl(
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        timestamp: '2025-01-01T00:00:00Z',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }, // no id
+          ],
+        },
+      },
+      {
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2025-01-01T00:00:01Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'nonexistent', content: 'orphan result' },
+          ],
+        },
+      },
+    );
+    const session = parseTrace(input);
+    // Tool call counted but since no id, the tool_result can't match → becomes orphan
+    expect(session.stats.toolCalls).toBe(1);
+    // The tool_result for 'nonexistent' won't match any pending call → orphan event
+    const orphanEvent = session.events.find(e => e.toolCalls?.[0]?.name === '<orphan_tool_result>');
+    expect(orphanEvent).toBeDefined();
+  });
+
+  it('produces no durationMs when trace has no timestamps', () => {
+    const input = jsonl(
+      {
+        type: 'user',
+        uuid: 'u1',
+        message: { role: 'user', content: 'hello' },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'reply' }],
+        },
+      },
+    );
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(2);
+    expect(session.startedAt).toBeNull();
+    expect(session.endedAt).toBeNull();
+    expect(session.stats.durationMs).toBeNull();
+  });
+
+  it('handles invalid timestamp strings without setting durationMs', () => {
+    const input = jsonl(
+      {
+        type: 'user',
+        uuid: 'u1',
+        timestamp: 'not-a-date',
+        message: { role: 'user', content: 'hello' },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        timestamp: 'also-not-a-date',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'reply' }],
+        },
+      },
+    );
+    const session = parseTrace(input);
+    expect(session.events).toHaveLength(2);
+    // firstTs and lastTs are set (truthy strings), but Date.parse returns NaN
+    expect(session.startedAt).toBe('not-a-date');
+    expect(session.endedAt).toBe('also-not-a-date');
+    expect(session.stats.durationMs).toBeNull();
+  });
+
   it('handles 10K+ lines without OOM', () => {
     const lines: string[] = [];
     for (let i = 0; i < 10_000; i++) {
