@@ -165,6 +165,56 @@ describe('dispatchAgents', () => {
     expect(completed!.durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('handles non-Error thrown by LLM (string coercion)', async () => {
+    const mockLLM = {
+      complete: vi.fn().mockImplementation(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw 'raw string error';
+      }),
+    } as unknown as LLMClient;
+
+    const results = await dispatchAgents([mockLenses[0]], mockContext, mockLLM);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].lensId).toBe('security');
+    expect(results[0].error).toBe('raw string error');
+    expect(results[0].findings).toEqual([]);
+  });
+
+  it('handles non-Error thrown by LLM (number coercion)', async () => {
+    const mockLLM = {
+      complete: vi.fn().mockImplementation(() => {
+        // eslint-disable-next-line no-throw-literal
+        throw 42;
+      }),
+    } as unknown as LLMClient;
+
+    const results = await dispatchAgents([mockLenses[0]], mockContext, mockLLM);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].error).toBe('42');
+    expect(results[0].findings).toEqual([]);
+  });
+
+  it('passes hipaaContext option through to buildPrompt without error', async () => {
+    const hipaaLens: Lens = { id: 'hipaa', name: 'HIPAA', description: '', systemPrompt: 'HIPAA prompt', focusAreas: [] };
+    const mockLLM = {
+      complete: vi.fn().mockResolvedValue(validFindingResponse),
+    } as unknown as LLMClient;
+
+    const results = await dispatchAgents([hipaaLens], mockContext, mockLLM, {
+      hipaaContext: 'PHI handling policy: encrypt all fields',
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].lensId).toBe('hipaa');
+    expect(results[0].error).toBeUndefined();
+    // Verify the LLM was called with hipaaContext in the user prompt
+    expect(mockLLM.complete).toHaveBeenCalledTimes(1);
+    const userPrompt = (mockLLM.complete as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(userPrompt).toContain('PHI handling policy');
+  });
+
   it('calls onProgress with durationMs on failure', async () => {
     const mockLLM = {
       complete: vi.fn().mockRejectedValue(new Error('LLM error')),
