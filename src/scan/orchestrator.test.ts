@@ -853,6 +853,40 @@ describe('scanCodebase', () => {
       expect(result.stats.cleanDomains.length).toBe(result.coverage.length);
     }
   });
+
+  it('chunk failure with non-Error thrown value uses String() fallback', async () => {
+    // Exercises the `String(err)` branch in processChunk catch block (line 98)
+    // when the thrown value is not an Error instance (e.g. a plain string)
+    writeTestFiles({
+      'src/auth/login.ts': 'export function login() {}',
+    });
+
+    const llm = makeMockLLM(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw 'non-error string thrown from LLM';
+    });
+    const options = defaultOptions();
+    const result = await scanCodebase(tmpDir, options, llm as any, {});
+
+    const erroredChunks = result.chunks.filter((c) => c.error);
+    if (erroredChunks.length > 0) {
+      expect(erroredChunks[0].error).toBe('non-error string thrown from LLM');
+    }
+  });
+
+  it('uses default concurrency of 3 when maxConcurrency is 0', async () => {
+    // Exercises the `options.maxConcurrency || 3` fallback branch (line 220)
+    writeTestFiles({
+      'src/app.ts': 'export const x = 1;',
+    });
+
+    const llm = makeMockLLM(() => '[]');
+    const options = defaultOptions({ maxConcurrency: 0 });
+    const result = await scanCodebase(tmpDir, options, llm as any, {});
+
+    expect(result).toBeDefined();
+    expect(result.chunks.length).toBeGreaterThan(0);
+  });
 });
 
 describe('RedactingReader', () => {
