@@ -215,6 +215,38 @@ describe('dispatchAgents', () => {
     expect(userPrompt).toContain('PHI handling policy');
   });
 
+  it('returns fallback object when Promise.allSettled yields a rejected result', async () => {
+    const mockLLM = {
+      complete: vi.fn().mockResolvedValue(validFindingResponse),
+    } as unknown as LLMClient;
+
+    // Save original allSettled
+    const origAllSettled = Promise.allSettled;
+    // Mock allSettled to return one rejected result
+    Promise.allSettled = vi.fn().mockResolvedValue([
+      { status: 'rejected', reason: new Error('unexpected boom') },
+      { status: 'rejected', reason: 'string rejection' },
+    ]) as unknown as typeof Promise.allSettled;
+
+    try {
+      const results = await dispatchAgents(mockLenses, mockContext, mockLLM);
+
+      expect(results).toHaveLength(2);
+      // First: Error instance
+      expect(results[0].lensId).toBe('security');
+      expect(results[0].findings).toEqual([]);
+      expect(results[0].error).toBe('unexpected boom');
+      expect(results[0].durationMs).toBe(0);
+      // Second: string rejection
+      expect(results[1].lensId).toBe('quality');
+      expect(results[1].findings).toEqual([]);
+      expect(results[1].error).toBe('string rejection');
+      expect(results[1].durationMs).toBe(0);
+    } finally {
+      Promise.allSettled = origAllSettled;
+    }
+  });
+
   it('calls onProgress with durationMs on failure', async () => {
     const mockLLM = {
       complete: vi.fn().mockRejectedValue(new Error('LLM error')),
