@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildFlowOptions, flowPathsToFindings } from './index.js';
 import { DEFAULT_FLOW_OPTIONS } from './types.js';
 import type { VerifiedPath, FlowSafePatternConfig, FullImportGraph, FilePhiProfile, FlowAnalysisInput, LLMClient } from './types.js';
+import type { FileFetcher } from './import-graph-full.js';
 import type { HipaaConfig } from '../../config/repo-config.js';
 import type { ImportEdge } from '../../types/index.js';
 
@@ -293,6 +294,32 @@ describe('analyzePhiFlow', () => {
       { path: 'd.ts', type: 'blob' },
     ]);
     expect(result.graphStats.filesAnalyzed).toBe(2);
+  });
+
+  it('mapFetcher returns null for unknown file paths', async () => {
+    const { analyzePhiFlow } = await import('./index.js');
+
+    let capturedFetcher: FileFetcher | null = null;
+    mockBuildFullImportGraph.mockImplementation((_paths: unknown, _tree: unknown, fetcher: FileFetcher) => {
+      capturedFetcher = fetcher;
+      return Promise.resolve(makeEmptyImportGraph());
+    });
+
+    const input: FlowAnalysisInput = {
+      options: { ...DEFAULT_FLOW_OPTIONS, mode: 'scan' },
+      files: [{ path: 'known.ts', content: 'const x = 1;' }],
+      llm: makeMockLLM(),
+      // no tree, no fetcher — triggers the mapFetcher code path
+    };
+
+    await analyzePhiFlow(input);
+
+    // Verify the fetcher was captured and works correctly
+    expect(capturedFetcher).not.toBeNull();
+    // Known file returns content
+    expect(await capturedFetcher!.fetchFile('known.ts')).toBe('const x = 1;');
+    // Unknown file returns null (the ?? null branch)
+    expect(await capturedFetcher!.fetchFile('nonexistent.ts')).toBeNull();
   });
 
   it('creates minimal profile for files with runtime flows but no LLM profile', async () => {
