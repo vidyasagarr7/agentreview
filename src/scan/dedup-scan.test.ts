@@ -303,4 +303,89 @@ describe('dedupScanFindings', () => {
     // Detail from f2 is longer, so it should be kept
     expect(result[0].detail).toBe('A much longer detail that should be kept in the merged finding');
   });
+
+  // --- Suggestion Merge Branch Coverage ---
+
+  it('merge: source has suggestion, target has none → uses source suggestion', () => {
+    // a (target) is first, b (source) is second. Same file/line/category → Pass 1 merge.
+    const f1 = makeFinding({
+      id: 'f-tgt',
+      location: 'src/svc.ts:60',
+      category: 'injection',
+      severity: 'HIGH',
+      summary: 'Injection issue present',
+    });
+    // Remove the target's suggestion so target.suggestion is undefined (falsy)
+    delete (f1 as any).suggestion;
+
+    const f2 = makeFinding({
+      id: 'f-src',
+      location: 'src/svc.ts:62', // within ±5 lines
+      category: 'injection',
+      severity: 'MEDIUM',
+      summary: 'Injection issue present here',
+      suggestion: 'Sanitize all user input',
+    });
+
+    const chunks = [makeChunkResult('injection', [f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('f-tgt'); // a is the survivor
+    expect(result[0].suggestion).toBe('Sanitize all user input');
+  });
+
+  it('merge: source suggestion longer than target → uses source suggestion', () => {
+    const f1 = makeFinding({
+      id: 'f-tgt-short',
+      location: 'src/svc.ts:60',
+      category: 'injection',
+      severity: 'HIGH',
+      summary: 'Injection issue present',
+      suggestion: 'Fix it',
+    });
+
+    const f2 = makeFinding({
+      id: 'f-src-long',
+      location: 'src/svc.ts:62', // within ±5 lines
+      category: 'injection',
+      severity: 'MEDIUM',
+      summary: 'Injection issue present here',
+      suggestion: 'Use parameterized queries and validate all untrusted input thoroughly',
+    });
+
+    const chunks = [makeChunkResult('injection', [f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('f-tgt-short'); // a is the survivor
+    expect(result[0].suggestion).toBe('Use parameterized queries and validate all untrusted input thoroughly');
+  });
+
+  it('merge: source suggestion shorter than target → keeps target suggestion', () => {
+    const f1 = makeFinding({
+      id: 'f-tgt-long',
+      location: 'src/svc.ts:60',
+      category: 'injection',
+      severity: 'HIGH',
+      summary: 'Injection issue present',
+      suggestion: 'Use parameterized queries and validate all untrusted input thoroughly',
+    });
+
+    const f2 = makeFinding({
+      id: 'f-src-short',
+      location: 'src/svc.ts:62', // within ±5 lines
+      category: 'injection',
+      severity: 'MEDIUM',
+      summary: 'Injection issue present here',
+      suggestion: 'Fix it',
+    });
+
+    const chunks = [makeChunkResult('injection', [f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('f-tgt-long'); // a is the survivor
+    expect(result[0].suggestion).toBe('Use parameterized queries and validate all untrusted input thoroughly');
+  });
 });
