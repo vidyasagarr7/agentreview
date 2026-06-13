@@ -139,6 +139,46 @@ describe('buildCodebaseContext', () => {
     consoleSpy.mockRestore();
   });
 
+  it('logs verbose diagnostics when PR has added files', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const prWithAdded: PRData = {
+      ...mockPR,
+      files: [
+        { filename: 'src/auth.ts', status: 'modified', additions: 5, deletions: 1, changes: 6, patch: '+code' },
+        { filename: 'src/new-file.ts', status: 'added', additions: 10, deletions: 0, changes: 10, patch: '+new' },
+      ],
+    };
+
+    const gh = {
+      getBaseSha: vi.fn().mockResolvedValue('abc123'),
+      getRepoTree: vi.fn().mockResolvedValue({
+        sha: 'abc123',
+        entries: [
+          { path: 'src/auth.ts', type: 'blob', size: 1000 },
+          { path: 'src/utils.ts', type: 'blob', size: 500 },
+        ],
+        truncated: false,
+      }),
+      getFileContent: vi.fn().mockResolvedValue("import { hash } from './utils';\nexport function login() {}"),
+    } as any;
+
+    const result = await buildCodebaseContext(prWithAdded, gh, {
+      enabled: true,
+      budgetTokens: 8000,
+      verbose: true,
+    });
+
+    expect(result).toBeDefined();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[codebase]'),
+    );
+    const calls = consoleSpy.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((msg) => msg.includes('newly added files'))).toBe(true);
+
+    consoleSpy.mockRestore();
+  });
+
   it('logs verbose error when GitHub API fails and verbose is true', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
