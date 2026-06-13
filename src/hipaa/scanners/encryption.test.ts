@@ -510,4 +510,46 @@ describe('encryption scanner', () => {
       expect(gcsFindings).toHaveLength(0);
     });
   });
+
+  // ── 2.8 phiSourcePatterns custom path patterns ────────────────────
+
+  describe('phiSourcePatterns custom path patterns', () => {
+    it('treats a path matching phiSourcePatterns as PHI-relevant → CRITICAL', () => {
+      const files = new Map([
+        ['src/custom-phi-store/db.ts', `const url = 'postgres://user:pass@host/records';`],
+      ]);
+      const findings = encryptionScanner.scan(files, {
+        ...options,
+        phiSourcePatterns: ['custom-phi-store/*'],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('CRITICAL');
+    });
+
+    it('does not treat a non-matching path as PHI-relevant → 0 findings', () => {
+      const files = new Map([
+        ['src/regular/db.ts', `const url = 'postgres://user:pass@host/records';`],
+      ]);
+      const findings = encryptionScanner.scan(files, {
+        ...options,
+        phiSourcePatterns: ['custom-phi-store/*'],
+      });
+      expect(findings).toHaveLength(0);
+    });
+
+    it('flags s3.putObject without a Bucket: literal in a phiSourcePatterns file (hasBucketPhiKeyword false branch) → HIGH', () => {
+      const files = new Map([
+        ['src/custom-phi-store/upload.ts', `s3.putObject(params);`],
+      ]);
+      const findings = encryptionScanner.scan(files, {
+        ...options,
+        phiSourcePatterns: ['custom-phi-store/*'],
+      });
+      // No Bucket: literal so hasBucketPhiKeyword returns false, but the file
+      // is PHI-relevant via phiSourcePatterns, so the upload is still flagged.
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('HIGH');
+      expect(findings[0].category).toBe('Unencrypted Cloud Storage');
+    });
+  });
 });
