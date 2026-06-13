@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalSourceReader } from './local-reader.js';
 
 describe('LocalSourceReader', () => {
@@ -127,5 +127,78 @@ describe('LocalSourceReader', () => {
     const reader = new LocalSourceReader(tmpDir);
     const content = await reader.readFile('does-not-exist.ts');
     expect(content).toBeNull();
+  });
+
+  it('walk() skips directories when readdirSync throws (permission denied)', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'visible.ts'), 'ok');
+    const denied = path.join(tmpDir, 'denied');
+    fs.mkdirSync(denied);
+    fs.writeFileSync(path.join(denied, 'hidden.ts'), 'secret');
+
+    const originalReaddir = fs.readdirSync;
+    const spy = vi.spyOn(fs, 'readdirSync').mockImplementation((...args: any[]) => {
+      const p = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (p.endsWith('denied')) {
+        throw new Error('EACCES: permission denied');
+      }
+      return originalReaddir.apply(fs, args as any);
+    });
+
+    const reader = new LocalSourceReader(tmpDir);
+    const files = await reader.listFiles();
+    const paths = files.map((f) => f.path).sort();
+
+    expect(paths).toEqual(['visible.ts']);
+    spy.mockRestore();
+  });
+
+  it('walk() skips entries when lstatSync throws', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'good.ts'), 'ok');
+    fs.writeFileSync(path.join(tmpDir, 'bad.ts'), 'fail');
+
+    const originalLstat = fs.lstatSync;
+    const spy = vi.spyOn(fs, 'lstatSync').mockImplementation((...args: any[]) => {
+      const p = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (p.endsWith('bad.ts')) {
+        throw new Error('mock lstat error');
+      }
+      return originalLstat.apply(fs, args as any);
+    });
+
+    const reader = new LocalSourceReader(tmpDir);
+    const files = await reader.listFiles();
+    const paths = files.map((f) => f.path);
+
+    expect(paths).toEqual(['good.ts']);
+    spy.mockRestore();
+  });
+
+  it('readFile() returns null when realpathSync throws (broken symlink)', async () => {
+    // Create a symlink pointing to a non-existent target
+    const brokenLink = path.join(tmpDir, 'broken-link.ts');
+    fs.symlinkSync('/tmp/nonexistent-target-xyz-12345', brokenLink);
+
+    const reader = new LocalSourceReader(tmpDir);
+    const content = await reader.readFile('broken-link.ts');
+    expect(content).toBeNull();
+  });
+
+  it('readFile() returns null when statSync throws after realpath succeeds', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'stat-fail.ts'), 'content');
+
+    const reader = new LocalSourceReader(tmpDir);
+
+    const originalStat = fs.statSync;
+    const spy = vi.spyOn(fs, 'statSync').mockImplementation((...args: any[]) => {
+      const p = typeof args[0] === 'string' ? args[0] : String(args[0]);
+      if (p.endsWith('stat-fail.ts')) {
+        throw new Error('mock stat error');
+      }
+      return originalStat.apply(fs, args as any);
+    });
+
+    const content = await reader.readFile('stat-fail.ts');
+    expect(content).toBeNull();
+    spy.mockRestore();
   });
 });
