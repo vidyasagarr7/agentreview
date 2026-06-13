@@ -214,4 +214,56 @@ describe('trace action handler', () => {
 
     expect(collectOutput(errorSpy)).toContain('no events found in trace file');
   });
+
+  it('formats a null duration as "unknown"', async () => {
+    const session = makeSession();
+    session.stats.durationMs = null;
+    mockParseTrace.mockReturnValue(session);
+    const cmd = createTraceCommand();
+    await cmd.parseAsync(['node', 'trace', '/path/to/file.jsonl']);
+
+    expect(collectOutput(logSpy)).toContain('Duration: unknown');
+  });
+
+  it('formats a sub-minute duration in seconds', async () => {
+    const session = makeSession();
+    session.stats.durationMs = 5000;
+    mockParseTrace.mockReturnValue(session);
+    const cmd = createTraceCommand();
+    await cmd.parseAsync(['node', 'trace', '/path/to/file.jsonl']);
+
+    expect(collectOutput(logSpy)).toContain('Duration: 5s');
+  });
+
+  it('renders text output when there are no findings', async () => {
+    mockAnalyzeTrace.mockReturnValue([]);
+    const cmd = createTraceCommand();
+    await cmd.parseAsync(['node', 'trace', '/path/to/file.jsonl']);
+
+    const out = collectOutput(logSpy);
+    expect(out).toContain('✅ No process issues detected');
+    expect(out).not.toContain('Process Findings (');
+  });
+
+  it('renders markdown output when there are no findings', async () => {
+    mockAnalyzeTrace.mockReturnValue([]);
+    const cmd = createTraceCommand();
+    await cmd.parseAsync(['node', 'trace', '/path/to/file.jsonl', '--format', 'markdown']);
+
+    const out = collectOutput(logSpy);
+    expect(out).toContain('## Process Findings');
+    expect(out).toContain('✅ No process issues detected.');
+  });
+
+  it('omits the markdown tool distribution section when no tools were called', async () => {
+    const session = makeSession();
+    session.stats.toolCallsByName = {};
+    mockParseTrace.mockReturnValue(session);
+    const cmd = createTraceCommand();
+    await cmd.parseAsync(['node', 'trace', '/path/to/file.jsonl', '--format', 'markdown']);
+
+    const out = collectOutput(logSpy);
+    expect(out).toContain('# Agent Trace Review');
+    expect(out).not.toContain('### Tool Distribution');
+  });
 });
