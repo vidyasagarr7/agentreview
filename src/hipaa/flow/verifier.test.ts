@@ -260,4 +260,39 @@ describe('verifyPaths', () => {
     expect(results[0].severity).toBe('MEDIUM'); // LOW → MEDIUM via SEVERITY_UP
     expect(results[0].baaStatus).toBe('no-baa');
   });
+
+  it('labels external sink with unrecognized endpoint as BAA STATUS UNKNOWN', async () => {
+    const llm = makeLlm([
+      JSON.stringify({
+        isLeak: true,
+        confidence: 'high',
+        explanation: 'PHI sent to an endpoint with no known BAA status',
+        baaRelevant: true,
+      }),
+    ]);
+
+    // Endpoint matches neither covered nor noBaa patterns → classifyEndpoint returns 'unknown'
+    const path = makePath({
+      sink: { file: 'src/errors/unknown.ts', name: 'https://unknown-service.example/api', line: 5, type: 'error-tracking' },
+      severity: 'HIGH',
+    });
+
+    const results = await verifyPaths([path], makeFileContents({
+      'src/errors/unknown.ts': 'await fetch("https://unknown-service.example/api", { body: JSON.stringify(patient) });',
+    }), llm, defaultBaaRegistry);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].baaStatus).toBe('unknown');
+  });
+
+  it('drops paths when LLM response fails validation even after retry', async () => {
+    // Both the initial call and the retry return invalid JSON → validated is null
+    const llm = makeLlm(['{ "not": "valid" }']);
+
+    const results = await verifyPaths([makePath()], makeFileContents(), llm, undefined);
+
+    expect(results).toHaveLength(0);
+    // initial call + one retry
+    expect(llm.chat).toHaveBeenCalledTimes(2);
+  });
 });
