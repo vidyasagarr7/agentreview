@@ -84,6 +84,16 @@ describe('extractPatch', () => {
   it('returns trimmed raw for unrecognized format', () => {
     expect(extractPatch('  just text  ')).toBe('just text');
   });
+
+  it('extracts from code-fenced patch block (not diff)', () => {
+    const raw = 'Fix:\n```patch\n--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new\n```\nDone';
+    expect(extractPatch(raw)).toContain('--- a/file.ts');
+  });
+
+  it('extracts from unfenced diff --git block', () => {
+    const raw = 'Some text\ndiff --git a/file.ts b/file.ts\nindex abc..def 100644\n--- a/file.ts\n+++ b/file.ts';
+    expect(extractPatch(raw)).toContain('diff --git');
+  });
 });
 
 describe('generateFixes', () => {
@@ -138,5 +148,116 @@ describe('generateFixes', () => {
     expect(calls[0]).toContain('sec-001');
     expect(calls[0]).toContain('Authorization bypass');
     expect(calls[0]).toContain('src/auth.ts:12');
+  });
+
+  it('matches file via endsWith when filename is a longer path', async () => {
+    const longPathContext: ReviewContext = {
+      ...context,
+      pr: {
+        ...context.pr,
+        files: [
+          {
+            filename: 'packages/api/src/auth.ts',
+            status: 'modified',
+            additions: 3,
+            deletions: 1,
+            changes: 4,
+            patch: '@@ -10,2 +10,3 @@\n-old\n+new',
+          },
+        ],
+      },
+    };
+
+    const calls: string[] = [];
+    const llm = {
+      async complete(_s: string, u: string) {
+        calls.push(u);
+        return '```diff\npatch\n```\nExplanation: fix';
+      },
+    };
+
+    // baseFinding.location is 'src/auth.ts:12' → file is 'src/auth.ts'
+    // context file is 'packages/api/src/auth.ts' which endsWith 'src/auth.ts'
+    await generateFixes([baseFinding], longPathContext, llm);
+
+    // Should have matched via endsWith and included the patch, not '(no patch available)'
+    expect(calls[0]).toContain('@@ -10,2 +10,3 @@');
+    expect(calls[0]).not.toContain('(no patch available)');
+  });
+
+  it('uses "(no patch available)" when no file matches the finding location', async () => {
+    const noMatchContext: ReviewContext = {
+      ...context,
+      pr: {
+        ...context.pr,
+        files: [
+          {
+            filename: 'src/unrelated.ts',
+            status: 'modified',
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            patch: '@@ -1 +1,2 @@\n+line',
+          },
+        ],
+      },
+    };
+
+    const calls: string[] = [];
+    const llm = {
+      async complete(_s: string, u: string) {
+        calls.push(u);
+        return '```diff\npatch\n```\nExplanation: fix';
+      },
+    };
+
+    await generateFixes([baseFinding], noMatchContext, llm);
+
+    expect(calls[0]).toContain('(no patch available)');
+  });
+
+  it('uses "(no patch available)" when matched file has undefined patch', async () => {
+    const noPatchContext: ReviewContext = {
+      ...context,
+      pr: {
+        ...context.pr,
+        files: [
+          {
+            filename: 'src/auth.ts',
+            status: 'modified',
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            // patch is undefined
+          } as any,
+        ],
+      },
+    };
+
+    const calls: string[] = [];
+    const llm = {
+      async complete(_s: string, u: string) {
+        calls.push(u);
+        return '```diff\npatch\n```\nExplanation: fix';
+      },
+    };
+
+    await generateFixes([baseFinding], noPatchContext, llm);
+
+    // match?.patch is undefined → relevantPatch returns '' → buildFixPrompt uses '(no patch available)'
+    expect(calls[0]).toContain('(no patch available)');
+  });
+
+  it('uses default explanation when LLM returns no "Explanation:" line', async () => {
+    const llm = {
+      async complete() {
+        return '```diff\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -10 +10 @@\n-old\n+new\n```\nJust a plain comment with no explanation label.';
+      },
+    };
+
+    const fixes = await generateFixes([baseFinding], context, llm);
+
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].explanation).toBe('Fix applied for the described issue.');
   });
 });
