@@ -388,4 +388,173 @@ describe('dedupScanFindings', () => {
     expect(result[0].id).toBe('f-tgt-long'); // a is the survivor
     expect(result[0].suggestion).toBe('Use parameterized queries and validate all untrusted input thoroughly');
   });
+
+  // ─── parseLocation branch coverage (line 24/25) ───────────────────────
+
+  it('parseLocation: location with no colon → null line, no proximity merge', () => {
+    // Both findings share a file but neither has a parseable line number.
+    // parts.length === 1 → line = null (line 24 false branch). Because locA.line
+    // and locB.line are null, the Pass 1 proximity check is skipped entirely.
+    const f1 = makeFinding({
+      id: 'f-nocolon-1',
+      location: 'src/config.ts', // no colon → no line
+      category: 'secrets',
+      severity: 'HIGH',
+      summary: 'Distinct alpha finding about logging output',
+    });
+    const f2 = makeFinding({
+      id: 'f-nocolon-2',
+      location: 'src/config.ts', // no colon → no line
+      category: 'secrets',
+      severity: 'MEDIUM',
+      summary: 'Unrelated beta finding regarding timeout values',
+    });
+
+    // Same domain so Pass 2 cross-domain merge cannot apply, and dissimilar
+    // summaries — they should remain two separate findings.
+    const chunks = [makeChunkResult('secrets', [f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    expect(result).toHaveLength(2);
+  });
+
+  it('parseLocation: non-numeric line → null line, no proximity merge', () => {
+    // location "src/config.ts:abc" → parseInt("abc") = NaN → isNaN branch (line 25)
+    // forces line back to null, so proximity merge is skipped.
+    const f1 = makeFinding({
+      id: 'f-nan-1',
+      location: 'src/config.ts:abc', // non-numeric line → NaN → null
+      category: 'secrets',
+      severity: 'HIGH',
+      summary: 'Distinct alpha finding about logging output',
+    });
+    const f2 = makeFinding({
+      id: 'f-nan-2',
+      location: 'src/config.ts:xyz', // non-numeric line → NaN → null
+      category: 'secrets',
+      severity: 'MEDIUM',
+      summary: 'Unrelated beta finding regarding timeout values',
+    });
+
+    const chunks = [makeChunkResult('secrets', [f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    // Both lines parse to null → no Pass 1 merge; same domain + dissimilar
+    // summaries → no Pass 2 merge.
+    expect(result).toHaveLength(2);
+  });
+
+  // ─── tokenOverlap with empty summaries (documents real behavior) ───────
+
+  it('tokenOverlap: two empty summaries across domains DO merge (overlap = 1.0)', () => {
+    // NOTE: `"".split(/\s+/)` returns `[""]`, not `[]`, so tokenOverlap("", "")
+    // computes intersection {""} / union {""} = 1.0 — NOT 0. Two empty-summary
+    // findings from different domains therefore exceed the 0.5 threshold and merge.
+    // (The `union.size === 0 ? 0` arm on line 35 is unreachable dead code, since
+    // split always yields at least one element — it cannot be covered via this API.)
+    const f1 = makeFinding({
+      id: 'f-empty-1',
+      location: 'src/empty.ts:10',
+      category: 'secrets',
+      severity: 'HIGH',
+      summary: '',
+    });
+    const f2 = makeFinding({
+      id: 'f-empty-2',
+      location: 'src/empty.ts:80', // far apart, different category → no Pass 1 merge
+      category: 'config',
+      severity: 'CRITICAL',
+      summary: '',
+    });
+
+    const chunks = [
+      makeChunkResult('secrets', [f1]),
+      makeChunkResult('config', [f2]),
+    ];
+
+    const result = dedupScanFindings(chunks);
+    expect(result).toHaveLength(1);
+    expect(result[0].severity).toBe('CRITICAL');
+    expect(result[0].lenses).toContain('secrets');
+    expect(result[0].lenses).toContain('config');
+  });
+
+  // ─── absorbed-skip continue branches (line 101 / line 145) ─────────────
+
+  it('Pass 1: skips an already-absorbed finding (absorbed.has(group[j]) continue)', () => {
+    // Three findings in the same file. f0 absorbs f2 (within ±5 lines, same
+    // category). When the outer loop reaches i=1 (f1, not absorbed), its inner
+    // loop hits j=2 (f2) which is already absorbed → `continue` on line 101.
+    const f0 = makeFinding({
+      id: 'f-p1-anchor',
+      location: 'src/skip.ts:10',
+      category: 'injection',
+      severity: 'HIGH',
+      summary: 'Injection anchor finding alpha',
+    });
+    const f1 = makeFinding({
+      id: 'f-p1-far',
+      location: 'src/skip.ts:100', // far from f0 → no merge with f0
+      category: 'injection',
+      severity: 'LOW',
+      summary: 'Unrelated distant finding gamma',
+    });
+    const f2 = makeFinding({
+      id: 'f-p1-absorbed',
+      location: 'src/skip.ts:12', // within ±5 of f0 → absorbed by f0
+      category: 'injection',
+      severity: 'MEDIUM',
+      summary: 'Injection nearby finding beta',
+    });
+
+    // Single chunk → same domain, so Pass 2 cannot re-merge the survivors.
+    const chunks = [makeChunkResult('injection', [f0, f1, f2])];
+
+    const result = dedupScanFindings(chunks);
+    // f0 absorbs f2; f1 stands alone → two findings remain.
+    expect(result).toHaveLength(2);
+    expect(result.map((f) => f.id).sort()).toEqual(['f-p1-anchor', 'f-p1-far']);
+  });
+
+  it('Pass 2: skips an already-absorbed finding (absorbed2.has(group[j]) continue)', () => {
+    // Three findings in the same file. In Pass 2, f0 (auth) absorbs f2 (general)
+    // via similar summaries. When i advances to f1 (same domain as f0 → not merged
+    // with f0), its inner loop reaches j=2 (f2), already absorbed → `continue`
+    // on line 145.
+    const f0 = makeFinding({
+      id: 'f-p2-anchor',
+      location: 'src/cross.ts:10',
+      category: 'auth',
+      severity: 'MEDIUM',
+      summary: 'Authentication bypass through token reuse vulnerability',
+    });
+    const f1 = makeFinding({
+      id: 'f-p2-samedomain',
+      location: 'src/cross.ts:200', // far → no Pass 1 merge with anyone
+      category: 'auth',
+      summary: 'Completely unrelated cross site request forgery issue',
+    });
+    const f2 = makeFinding({
+      id: 'f-p2-absorbed',
+      location: 'src/cross.ts:80', // far + different category → no Pass 1 merge
+      category: 'session',
+      severity: 'CRITICAL',
+      summary: 'Authentication bypass through token reuse vulnerability',
+    });
+
+    const chunks = [
+      makeChunkResult('auth', [f0, f1]),
+      makeChunkResult('general', [f2]),
+    ];
+
+    const result = dedupScanFindings(chunks);
+    // Pass 2: f0 (auth) + f2 (general) merge across domains; f1 shares f0's
+    // domain set so it is never merged → two findings remain.
+    expect(result).toHaveLength(2);
+    expect(result.map((f) => f.id).sort()).toEqual(['f-p2-anchor', 'f-p2-samedomain']);
+    const merged = result.find((f) => f.id === 'f-p2-anchor')!;
+    expect(merged.severity).toBe('CRITICAL'); // absorbed f2's higher severity
+    expect(merged.lenses).toContain('auth');
+    expect(merged.lenses).toContain('general');
+  });
 });
