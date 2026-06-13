@@ -228,4 +228,133 @@ describe('renderMarkdown', () => {
     expect(output).toContain('`generated.lock`');
     expect(output).toContain('binary or no patch');
   });
+
+  it('renders a multi-lens tag when a finding has more than one lens', () => {
+    const multiLensFinding = {
+      ...criticalFinding,
+      lenses: ['security', 'architecture'],
+    };
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [multiLensFinding],
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1, architecture: 1 },
+        cleanLenses: ['quality'],
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('[security + architecture]');
+  });
+
+  it('falls back to [unknown] when a finding has no lenses', () => {
+    const noLensFinding = {
+      ...criticalFinding,
+      lenses: [] as string[],
+    };
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [noLensFinding],
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('[unknown]');
+  });
+
+  it('omits the raw response details when a parse error has no raw payload', () => {
+    const parseError: ParseError = {
+      type: 'ParseError',
+      lensId: 'security',
+      raw: '',
+      message: '[PARSE ERROR] security lens returned garbled response',
+    };
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      parseErrors: [parseError],
+      confidence: 'LOW',
+      stats: {
+        ...baseReport.stats,
+        parseErrorLenses: ['security'],
+        cleanLenses: ['architecture', 'quality'],
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('[PARSE ERROR]');
+    expect(output).not.toContain('<details>');
+    expect(output).not.toContain('Raw response (truncated)');
+  });
+
+  it('uses singular wording when exactly one low-confidence finding is filtered', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [criticalFinding],
+      validationStats: {
+        confirmed: 1,
+        uncertain: 0,
+        disproven: 0,
+        unvalidated: 0,
+        filtered: 1,
+      },
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1 },
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Filtered from PR comment: 1 low-confidence finding hidden.');
+    expect(output).not.toContain('findings hidden');
+  });
+
+  it('shows plural issue count in lens note when a lens has multiple findings', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [criticalFinding, { ...criticalFinding, id: 'sec-002' }],
+      stats: {
+        ...baseReport.stats,
+        total: 2,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 2 },
+        byLens: { security: 2 },
+        cleanLenses: ['architecture', 'quality'],
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Found 2 issues.');
+  });
+
+  it('shows singular issue count in lens note when a lens has exactly one finding', () => {
+    const report: ConsolidatedReport = {
+      ...baseReport,
+      findings: [criticalFinding],
+      stats: {
+        ...baseReport.stats,
+        total: 1,
+        bySeverity: { ...baseReport.stats.bySeverity, CRITICAL: 1 },
+        byLens: { security: 1 },
+        cleanLenses: ['architecture', 'quality'],
+      },
+    };
+
+    const output = renderMarkdown(report);
+
+    expect(output).toContain('Found 1 issue.');
+    expect(output).not.toContain('Found 1 issues.');
+  });
 });
