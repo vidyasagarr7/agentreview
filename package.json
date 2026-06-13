@@ -62,5 +62,8 @@
   "homepage": "https://github.com/vidyasagarr7/agentreview#readme",
   "bugs": {
     "url": "https://github.com/vidyasagarr7/agentreview/issues"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
   }
 }
