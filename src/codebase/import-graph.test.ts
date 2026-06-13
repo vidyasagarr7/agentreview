@@ -159,4 +159,17 @@ describe('buildImportGraph', () => {
     });
     expect(result.importsOut[0].symbols).toBeUndefined();
   });
+
+  it('skips unsupported language files with an info diagnostic', async () => {
+    const result = await buildImportGraph(['src/utils.py'], tree, fetcher);
+
+    expect(result.importsOut).toHaveLength(0);
+    expect(result.filesAnalyzed).toBe(0);
+    expect(result.filesFailed).toBe(0);
+    expect(
+      result.diagnostics.some(
+        (d) => d.level === 'info' && d.message.includes('utils.py'),
+      ),
+    ).toBe(true);
+  });
 });
