@@ -83,6 +83,12 @@ describe('renderEnsembleFinding', () => {
     expect(output).toContain('⚠️');
   });
 
+  it('shows [unknown] when lenses array is empty', () => {
+    const finding = mf({ lenses: [] });
+    const output = renderEnsembleFinding(finding, 2);
+    expect(output).toContain('[unknown]');
+  });
+
   it('joins multiple lenses with +', () => {
     const finding = mf({ lenses: ['security', 'architecture'] });
     const output = renderEnsembleFinding(finding, 2);
