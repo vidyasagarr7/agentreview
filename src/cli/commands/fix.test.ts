@@ -116,6 +116,7 @@ import { checkDataDisclosure } from '../disclosure.js';
 import { parsePRUrl, InvalidPRUrlError } from '../../github/parse-url.js';
 import { GitHubClient, GitHubAuthError, GitHubNotFoundError, GitHubRateLimitError } from '../../github/client.js';
 import { consolidate } from '../../report/consolidator.js';
+import { validateAgentResults } from '../../validation/validator.js';
 import { generateFixes, isFixable } from '../../fix/generator.js';
 import { verifyFixes } from '../../fix/verifier.js';
 import { applyPatch, revertPatch } from '../../fix/applier.js';
@@ -437,5 +438,57 @@ describe('runFix (via parseAsync)', () => {
     await cmd.parseAsync(['node', 'test', VALID_PR_URL, '--dry-run', '--yes']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Fix Summary'));
+  });
+
+  it('proceeds without validation when validateAgentResults throws (lines 131-132)', async () => {
+    const fixFindings = [{ id: 'f1', severity: 'HIGH', title: 'Bug' }];
+    const fixes = [
+      { findingId: 'f1', status: 'pending', patch: 'p', explanation: 'e' },
+    ];
+    setupMocks({ findings: fixFindings, fixes });
+    vi.mocked(validateAgentResults).mockRejectedValue(new Error('validation boom'));
+
+    const cmd = createFixCommand();
+    await cmd.parseAsync(['node', 'test', VALID_PR_URL, '--dry-run', '--yes']);
+
+    // Falls back to agentResults and continues to generate fixes
+    expect(vi.mocked(generateFixes)).toHaveBeenCalled();
+    expect(vi.mocked(renderFixReport)).toHaveBeenCalled();
+  });
+
+  it('--verbose logs how many findings were filtered below confidence (line 148)', async () => {
+    const fixFindings = [
+      { id: 'f1', severity: 'HIGH', confidenceScore: 90, title: 'High conf' },
+      { id: 'f2', severity: 'LOW', confidenceScore: 30, title: 'Low conf' },
+    ];
+    setupMocks({ findings: fixFindings, fixes: [] });
+
+    const cmd = createFixCommand();
+    await cmd.parseAsync([
+      'node', 'test', VALID_PR_URL, '--dry-run', '--yes', '--verbose', '--min-confidence', '50',
+    ]);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Filtered 1 findings below 50% confidence'),
+    );
+  });
+
+  it('fails spinner when verification fails and revert also fails (line 201)', async () => {
+    const fixFindings = [{ id: 'f1', severity: 'HIGH', title: 'Bug' }];
+    const fixes = [
+      { findingId: 'f1', status: 'pending', patch: 'diff...', explanation: 'Fix' },
+    ];
+    setupMocks({ findings: fixFindings, fixes });
+    vi.mocked(applyPatch).mockResolvedValue(true);
+    vi.mocked(verifyFixes).mockResolvedValue([
+      { findingId: 'f1', passed: false, issues: ['Regression detected'] },
+    ] as any);
+    vi.mocked(revertPatch).mockResolvedValue(false);
+
+    const cmd = createFixCommand();
+    await cmd.parseAsync(['node', 'test', VALID_PR_URL, '--yes', '--repo-dir', '/tmp/repo']);
+
+    expect(vi.mocked(revertPatch)).toHaveBeenCalledWith('diff...', '/tmp/repo');
+    expect(fixes[0].status).toBe('reverted');
   });
 });
