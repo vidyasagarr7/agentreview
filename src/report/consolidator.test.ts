@@ -213,6 +213,32 @@ describe('consolidate', () => {
     expect(report.findings.map((f) => f.id)).toEqual(['sec-a', 'sec-b']);
   });
 
+  it('ranks unknown lenses after known lenses (fallback to LENS_ORDER.length)', () => {
+    const customMedium = {
+      ...criticalFinding,
+      id: 'custom-001',
+      severity: 'MEDIUM' as const,
+      location: 'src/zzz.ts:1',
+      lenses: ['custom'],
+    };
+    const qualMedium = {
+      ...lowFinding,
+      id: 'qual-med',
+      severity: 'MEDIUM' as const,
+      location: 'src/aaa.ts:1',
+      lenses: ['quality'],
+    };
+    const results: AgentResult[] = [
+      { lensId: 'custom', findings: [customMedium], durationMs: 100 },
+      { lensId: 'quality', findings: [qualMedium], durationMs: 100 },
+    ];
+
+    const report = consolidate(results, mockPR);
+
+    // quality (index 2) should sort before custom (index 3 = LENS_ORDER.length)
+    expect(report.findings.map((f) => f.id)).toEqual(['qual-med', 'custom-001']);
+  });
+
   it('skips deduplication when noDedup is true', () => {
     const results: AgentResult[] = [
       { lensId: 'security', findings: [criticalFinding], durationMs: 100 },
