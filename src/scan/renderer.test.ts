@@ -208,6 +208,36 @@ describe('renderScanReport', () => {
     });
   });
 
+  describe('sparse bySeverity (nullish coalescing fallback)', () => {
+    it('shows 0 for severity levels absent from bySeverity map', () => {
+      const findings = [
+        makeFinding({ id: 'sparse-1', severity: 'HIGH', location: 'src/a.ts', summary: 'High severity issue' }),
+      ];
+      const result = makeResult({
+        findings,
+        // Intentionally omit CRITICAL, MEDIUM, LOW, INFO keys to trigger the ?? 0 fallback
+        stats: {
+          total: 1,
+          bySeverity: { HIGH: 1 } as Record<string, number> as ScanResult['stats']['bySeverity'],
+          byDomain: { auth: 1 },
+          cleanDomains: [],
+          erroredChunks: [],
+        },
+        coverage: [{ domain: 'auth', filesScanned: 5, findings: 1 }],
+      });
+
+      const md = renderScanReport(result, 'markdown');
+
+      // Present severity should show its count
+      expect(md).toContain('| HIGH | 1 |');
+      // Absent severities should fall back to 0 via ?? 0
+      expect(md).toContain('| CRITICAL | 0 |');
+      expect(md).toContain('| MEDIUM | 0 |');
+      expect(md).toContain('| LOW | 0 |');
+      expect(md).toContain('| INFO | 0 |');
+    });
+  });
+
   describe('single finding per file (singular hotspot label)', () => {
     it('uses singular "finding" when a file has exactly 1 finding', () => {
       const findings = [
