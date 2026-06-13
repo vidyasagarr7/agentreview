@@ -23,11 +23,6 @@ export function detectLanguage(filename: string): 'ts' | 'js' | 'py' | 'other' {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Extract the module specifier from a quoted string */
-function extractQuotedModule(s: string): string | null {
-  const m = s.match(/['"]([^'"]+)['"]/);
-  return m ? m[1] : null;
-}
 
 /** Parse a comma-separated list of symbols, stripping `as X` aliases */
 function parseSymbolList(raw: string): string[] {
