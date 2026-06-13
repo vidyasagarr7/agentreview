@@ -257,3 +257,70 @@ describe('profileFiles', () => {
     expect(results.size).toBe(0);
   });
 });
+
+// ─── filePriorityScore branch coverage (via profileFiles ordering) ────────────
+//
+// filePriorityScore is internal, so we exercise it indirectly: profileFiles
+// sorts files by priority before profiling them. With concurrency 1, pLimit
+// dispatches tasks in that prioritized order, so the order in which the LLM is
+// called reveals the relative scores. Each test isolates a single scoring
+// branch by holding everything else (path prefix, content length) constant.
+
+describe('filePriorityScore (via profileFiles ordering)', () => {
+  // Returns the order in which file paths were handed to the LLM.
+  function orderTrackingLlm(): { llm: LLMClient; order: string[] } {
+    const order: string[] = [];
+    const llm = pathAwareLlm((filePath) => {
+      order.push(filePath);
+      return JSON.stringify(VALID_PROFILE);
+    });
+    return { llm, order };
+  }
+
+  it('prioritizes a file importing a PHI source package (fhirclient) over one without', async () => {
+    // Both files share the lib/ prefix and equal-length content so the only
+    // difference is the +100 PHI-source-import branch (fhirclient).
+    const files = [
+      { path: 'lib/plain.ts', content: "import { foo } from './foo';" },
+      { path: 'lib/source.ts', content: "import client from 'fhirclient';" },
+    ];
+    const { llm, order } = orderTrackingLlm();
+
+    await profileFiles(files, llm, { concurrency: 1, maxFiles: 10 });
+
+    // The fhirclient file scores +100 and is profiled first.
+    expect(order[0]).toBe('lib/source.ts');
+    expect(order[1]).toBe('lib/plain.ts');
+  });
+
+  it('prioritizes a file importing a sink package (winston) over one without', async () => {
+    // Equal path prefix and content length isolate the +80 sink-import branch.
+    const files = [
+      { path: 'lib/plain.ts', content: "import { foo } from './foo';" },
+      { path: 'lib/sink.ts', content: "import winston from 'winston';" },
+    ];
+    const { llm, order } = orderTrackingLlm();
+
+    await profileFiles(files, llm, { concurrency: 1, maxFiles: 10 });
+
+    // The winston file scores +80 and is profiled first.
+    expect(order[0]).toBe('lib/sink.ts');
+    expect(order[1]).toBe('lib/plain.ts');
+  });
+
+  it('prioritizes a src/ file over a lib/ file with identical content', async () => {
+    // Identical content (no PHI/sink imports, same length) isolates the +10
+    // src/ path branch as the only differentiator.
+    const files = [
+      { path: 'lib/mod.ts', content: 'const x = 1;' },
+      { path: 'src/mod.ts', content: 'const x = 1;' },
+    ];
+    const { llm, order } = orderTrackingLlm();
+
+    await profileFiles(files, llm, { concurrency: 1, maxFiles: 10 });
+
+    // The src/ file scores +10 and is profiled first.
+    expect(order[0]).toBe('src/mod.ts');
+    expect(order[1]).toBe('lib/mod.ts');
+  });
+});
